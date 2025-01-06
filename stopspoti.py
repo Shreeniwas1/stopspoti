@@ -259,9 +259,25 @@ class AudioSessionManager:
             self._cleanup()
             return False
 
+# Modify to store all Spotify PIDs at the start
+def get_spotify_processes():
+    # Define identifiers for Spotify and Spotify Premium
+    SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium', 'spotify.exe', 'Spotify.exe', 'Spotify Premium']
+    
+    spotify_processes = []
+    for proc in psutil.process_iter(['pid', 'name']):
+        if proc.info['name']:
+            proc_name_lower = proc.info['name'].lower()
+            if any(identifier in proc_name_lower for identifier in SPOTIFY_IDENTIFIERS):
+                spotify_processes.append(proc)
+    return spotify_processes
+
+# Initialize SPOTIFY_PIDS
+SPOTIFY_PIDS = [proc.pid for proc in get_spotify_processes()]
+
 def get_spotify_process():
     # Define identifiers for Spotify and Spotify Premium
-    SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium']
+    SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium','spotify.exe','Spotify.exe','Spotify Premium']
     
     for proc in psutil.process_iter(['name']):
         if proc.info['name']:
@@ -270,6 +286,7 @@ def get_spotify_process():
                 return proc
     return None
 
+# Update focus_spotify to use stored PIDs
 def focus_spotify():
     try:
         import win32gui
@@ -284,73 +301,36 @@ def focus_spotify():
             if not win32gui.IsWindowVisible(hwnd):
                 return True
             _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
-            # Removed the window title check
-            if window_pid == pid:
+            if window_pid in SPOTIFY_PIDS:
                 spotify_hwnd = hwnd
                 return False
             return True
 
-        spotify_process = get_spotify_process()
-        if spotify_process:
+        for pid in SPOTIFY_PIDS:
             try:
-                win32gui.EnumWindows(callback, spotify_process.pid)
+                win32gui.EnumWindows(callback, pid)
+                if spotify_hwnd:
+                    fg_window = win32gui.GetForegroundWindow()
+                    current_thread_id = win32api.GetCurrentThreadId()
+                    fg_thread_id, _ = win32process.GetWindowThreadProcessId(fg_window)
+                    target_thread_id = win32process.GetWindowThreadProcessId(spotify_hwnd)[0]
+
+                    win32process.AttachThreadInput(current_thread_id, fg_thread_id, True)
+                    win32process.AttachThreadInput(current_thread_id, target_thread_id, True)
+
+                    win32gui.ShowWindow(spotify_hwnd, win32con.SW_RESTORE)
+                    win32gui.SetForegroundWindow(spotify_hwnd)
+
+                    win32process.AttachThreadInput(current_thread_id, fg_thread_id, False)
+                    win32process.AttachThreadInput(current_thread_id, target_thread_id, False)
+
+                    print(f"{time.strftime('%H:%M:%S')} - Spotify window focused for PID {pid}.", flush=True)
+                    return True
             except Exception as e:
-                if isinstance(e, OSError):
-                    if hasattr(e, 'winerror'):
-                        if e.winerror == 126:
-                            print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed: {e}", flush=True)
-                            print("Please ensure that pywin32 is correctly installed and all dependencies are present.", flush=True)
-                        elif e.winerror == 2:
-                            print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed: {e}", flush=True)
-                            print("The system cannot find the file specified. Please verify your pywin32 installation.", flush=True)
-                        else:
-                            print(f"{time.strftime('%H:%M:%S')} - EnumWindows exception: {e}", flush=True)
-                    else:
-                        print(f"{time.strftime('%H:%M:%S')} - EnumWindows exception: {e}", flush=True)
-                else:
-                    print(f"{time.strftime('%H:%M:%S')} - EnumWindows exception: {e}", flush=True)
-                return False
+                print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed for PID {pid}: {e}", flush=True)
+        print(f"{time.strftime('%H:%M:%S')} - Spotify windows not found for any stored PIDs.", flush=True)
+        return False
 
-            if spotify_hwnd:
-                fg_window = win32gui.GetForegroundWindow()
-                current_thread_id = win32api.GetCurrentThreadId()  # Updated to use win32api
-                fg_thread_id, _ = win32process.GetWindowThreadProcessId(fg_window)
-                target_thread_id = win32process.GetWindowThreadProcessId(spotify_hwnd)[0]
-
-                # Attach threads to allow SetForegroundWindow to succeed
-                win32process.AttachThreadInput(current_thread_id, fg_thread_id, True)
-                win32process.AttachThreadInput(current_thread_id, target_thread_id, True)
-
-                win32gui.ShowWindow(spotify_hwnd, win32con.SW_RESTORE)
-                win32gui.SetForegroundWindow(spotify_hwnd)
-
-                # Detach threads after setting foreground
-                win32process.AttachThreadInput(current_thread_id, fg_thread_id, False)
-                win32process.AttachThreadInput(current_thread_id, target_thread_id, False)
-
-                print(f"{time.strftime('%H:%M:%S')} - Spotify window focused.", flush=True)
-                return True
-            else:
-                print(f"{time.strftime('%H:%M:%S')} - Spotify window not found.", flush=True)
-                # Additional debugging: List all visible windows
-                def list_all_windows():
-                    def enum_callback(hwnd, results):
-                        if win32gui.IsWindowVisible(hwnd):
-                            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                            title = win32gui.GetWindowText(hwnd)
-                            results.append((hwnd, pid, title))
-                        return True
-                    windows = []
-                    win32gui.EnumWindows(enum_callback, windows)
-                    for hwnd, pid, title in windows:
-                        print(f"Window Handle: {hwnd}, PID: {pid}, Title: {title}", flush=True)
-
-                print("Listing all windows for debugging:", flush=True)
-                list_all_windows()
-                return False
-        else:
-            print(f"{time.strftime('%H:%M:%S')} - Spotify process not found.", flush=True)
-            return False
     except ImportError as e:
         print(f"Error importing win32 modules: {e}", flush=True)
         print("Please install pywin32 and ensure it is correctly configured.", flush=True)
