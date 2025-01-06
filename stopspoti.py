@@ -344,6 +344,14 @@ def pause_spotify():
         pyautogui.PAUSE = 0.1
         if focus_spotify():
             pyautogui.press('space')
+            # Minimize the Spotify window
+            try:
+                import win32gui
+                import win32con
+                spotify_hwnd = win32gui.GetForegroundWindow()
+                win32gui.ShowWindow(spotify_hwnd, win32con.SW_MINIMIZE)
+            except Exception as e:
+                print(f"Error minimizing Spotify window: {e}")
             print("Paused Spotify")
             return True
         else:
@@ -358,6 +366,14 @@ def play_spotify():
         pyautogui.PAUSE = 0.1
         if focus_spotify():
             pyautogui.press('space')
+            # Minimize the Spotify window
+            try:
+                import win32gui
+                import win32con
+                spotify_hwnd = win32gui.GetForegroundWindow()
+                win32gui.ShowWindow(spotify_hwnd, win32con.SW_MINIMIZE)
+            except Exception as e:
+                print(f"Error minimizing Spotify window: {e}")
             print("Resumed Spotify")
             return True
         else:
