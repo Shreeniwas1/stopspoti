@@ -284,8 +284,8 @@ def focus_spotify():
             if not win32gui.IsWindowVisible(hwnd):
                 return True
             _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
-            window_title = win32gui.GetWindowText(hwnd).lower()
-            if window_pid == pid and 'spotify' in window_title:
+            # Removed the window title check
+            if window_pid == pid:
                 spotify_hwnd = hwnd
                 return False
             return True
