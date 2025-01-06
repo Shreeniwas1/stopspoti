@@ -49,7 +49,7 @@ If such a scenario occurs, the program is designed to stop the loop after closin
 
 Contributions are welcome! Please fork the repository and submit a pull request with your enhancements or bug fixes.
 if possible share the exe with GUI if you know how to do it. :| thanks 
-i will be learning it but I dont have time right now [:(] 
+i will be learning it but I dont have time right now :(
 
 ## License
 
