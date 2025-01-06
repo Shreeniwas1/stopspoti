@@ -32,6 +32,8 @@ class AudioSessionManager:
         self._peak_threshold = 0.0005  # Increased threshold for better detection
         self._initialized = False
         self._com_initialized = False
+        self._last_log_time = 0  # Add last log time
+        self._log_interval = 1  # Set log interval to 1 second
         try:
             pythoncom.CoInitialize()
             self._com_initialized = True
@@ -50,40 +52,58 @@ class AudioSessionManager:
             try:
                 current_time = time.time()
                 if not self._initialized or current_time - self._last_check > self._cache_timeout:
-                    print(f"{time.strftime('%H:%M:%S')} - Initializing audio session manager...", flush=True)
+                    if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                        print(f"{time.strftime('%H:%M:%S')} - Initializing audio session manager...", flush=True)
+                        self._last_log_time = current_time
                     self._cleanup()
                     # Retry COM initialization up to 3 times
                     for attempt in range(3):
                         try:
-                            print(f"{time.strftime('%H:%M:%S')} - Initialization attempt {attempt + 1}", flush=True)
+                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                                print(f"{time.strftime('%H:%M:%S')} - Initialization attempt {attempt + 1}", flush=True)
+                                self._last_log_time = current_time
                             self._devices = pycaw.AudioUtilities.GetSpeakers()
-                            print(f"{time.strftime('%H:%M:%S')} - Retrieved speakers: {self._devices}", flush=True)
+                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                                print(f"{time.strftime('%H:%M:%S')} - Retrieved speakers: {self._devices}", flush=True)
+                                self._last_log_time = current_time
                             
                             self._interface = self._devices.Activate(
                                 pycaw.IAudioSessionManager2._iid_, 
                                 CLSCTX_ALL, 
                                 None
                             )
-                            print(f"{time.strftime('%H:%M:%S')} - Activated IAudioSessionManager2 interface: {self._interface}", flush=True)
+                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                                print(f"{time.strftime('%H:%M:%S')} - Activated IAudioSessionManager2 interface: {self._interface}", flush=True)
+                                self._last_log_time = current_time
                             
                             self._session_manager = cast(self._interface, POINTER(pycaw.IAudioSessionManager2))
-                            print(f"{time.strftime('%H:%M:%S')} - Casted to IAudioSessionManager2: {self._session_manager}", flush=True)
+                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                                print(f"{time.strftime('%H:%M:%S')} - Casted to IAudioSessionManager2: {self._session_manager}", flush=True)
+                                self._last_log_time = current_time
                             
                             self._sessions = self._session_manager.GetSessionEnumerator()
-                            print(f"{time.strftime('%H:%M:%S')} - Retrieved session enumerator: {self._sessions}", flush=True)
+                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                                print(f"{time.strftime('%H:%M:%S')} - Retrieved session enumerator: {self._sessions}", flush=True)
+                                self._last_log_time = current_time
                             
                             self._last_check = current_time
                             self._initialized = True
-                            print(f"{time.strftime('%H:%M:%S')} - Initialization successful", flush=True)
+                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                                print(f"{time.strftime('%H:%M:%S')} - Initialization successful", flush=True)
+                                self._last_log_time = current_time
                             break
                         except Exception as e:
-                            print(f"{time.strftime('%H:%M:%S')} - Initialization attempt {attempt + 1} failed: {e}", flush=True)
+                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                                print(f"{time.strftime('%H:%M:%S')} - Initialization attempt {attempt + 1} failed: {e}", flush=True)
+                                self._last_log_time = current_time
                             time.sleep(0.1)
                     
                     if not self._initialized:
                         raise Exception("Failed to initialize COM objects after 3 attempts")
             except Exception as e:
-                print(f"{time.strftime('%H:%M:%S')} - Critical initialization error: {e}", flush=True)
+                if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                    print(f"{time.strftime('%H:%M:%S')} - Critical initialization error: {e}", flush=True)
+                    self._last_log_time = current_time
                 self._cleanup()
                 raise
 
@@ -108,13 +128,13 @@ class AudioSessionManager:
                 self._devices = None
                 self._initialized = False
 
-    def __del__(self):
-        self._cleanup()
-        if self._com_initialized:
-            try:
+    def close(self):
+        try:
+            self._cleanup()
+            if self._com_initialized:
                 pythoncom.CoUninitialize()
-            except Exception:
-                pass
+        except Exception:
+            pass  # Silently ignore exceptions during cleanup
 
     def check_audio_sessions(self, check_spotify=False):
         if not self._com_initialized:
@@ -246,32 +266,91 @@ def focus_spotify():
         import win32gui
         import win32process
         import win32con
-        
-        def callback(hwnd, data):
+        import win32api
+
+        spotify_hwnd = None
+
+        def callback(hwnd, pid):
+            nonlocal spotify_hwnd
             if not win32gui.IsWindowVisible(hwnd):
                 return True
-            
-            tid, pid = win32process.GetWindowThreadProcessId(hwnd)
-            if 'spotify' in win32gui.GetWindowText(hwnd).lower():
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                win32gui.SetForegroundWindow(hwnd)
+            _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
+            window_title = win32gui.GetWindowText(hwnd).lower()
+            if window_pid == pid and 'spotify' in window_title:
+                spotify_hwnd = hwnd
                 return False
             return True
-            
-        win32gui.EnumWindows(callback, None)
-        time.sleep(0.1)  # Give Windows time to focus
-        return True
+
+        spotify_process = get_spotify_process()
+        if spotify_process:
+            try:
+                win32gui.EnumWindows(callback, spotify_process.pid)
+            except Exception as e:
+                if isinstance(e, OSError) and e.winerror == 126:
+                    print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed: {e}", flush=True)
+                    print("Please ensure that pywin32 is correctly installed and all dependencies are present.", flush=True)
+                else:
+                    print(f"{time.strftime('%H:%M:%S')} - EnumWindows exception: {e}", flush=True)
+                return False
+
+            if spotify_hwnd:
+                fg_window = win32gui.GetForegroundWindow()
+                current_thread_id = win32process.GetCurrentThreadId()
+                fg_thread_id, _ = win32process.GetWindowThreadProcessId(fg_window)
+                target_thread_id = win32process.GetWindowThreadProcessId(spotify_hwnd)[0]
+
+                # Attach threads to allow SetForegroundWindow to succeed
+                win32process.AttachThreadInput(current_thread_id, fg_thread_id, True)
+                win32process.AttachThreadInput(current_thread_id, target_thread_id, True)
+
+                win32gui.ShowWindow(spotify_hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(spotify_hwnd)
+
+                # Detach threads after setting foreground
+                win32process.AttachThreadInput(current_thread_id, fg_thread_id, False)
+                win32process.AttachThreadInput(current_thread_id, target_thread_id, False)
+
+                print(f"{time.strftime('%H:%M:%S')} - Spotify window focused.", flush=True)
+                return True
+            else:
+                print(f"{time.strftime('%H:%M:%S')} - Spotify window not found.", flush=True)
+                # Additional debugging: List all visible windows
+                def list_all_windows():
+                    def enum_callback(hwnd, results):
+                        if win32gui.IsWindowVisible(hwnd):
+                            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                            title = win32gui.GetWindowText(hwnd)
+                            results.append((hwnd, pid, title))
+                        return True
+                    windows = []
+                    win32gui.EnumWindows(enum_callback, windows)
+                    for hwnd, pid, title in windows:
+                        print(f"Window Handle: {hwnd}, PID: {pid}, Title: {title}", flush=True)
+
+                print("Listing all windows for debugging:", flush=True)
+                list_all_windows()
+                return False
+        else:
+            print(f"{time.strftime('%H:%M:%S')} - Spotify process not found.", flush=True)
+            return False
+    except ImportError as e:
+        print(f"Error importing win32 modules: {e}", flush=True)
+        print("Please install pywin32 and ensure it is correctly configured.", flush=True)
+        return False
     except Exception as e:
-        print(f"Error focusing Spotify: {e}")
+        print(f"Error focusing Spotify: {e}", flush=True)
         return False
 
 def pause_spotify():
     try:
         pyautogui.PAUSE = 0.1
-        focus_spotify()
-        pyautogui.press('space')
-        print("Paused Spotify")
-        return True
+        if focus_spotify():
+            pyautogui.press('space')
+            print("Paused Spotify")
+            return True
+        else:
+            print("Failed to focus Spotify before pausing.")
+            return False
     except Exception as e:
         print(f"Error pausing Spotify: {e}")
         return False
@@ -279,20 +358,42 @@ def pause_spotify():
 def play_spotify():
     try:
         pyautogui.PAUSE = 0.1
-        focus_spotify()
-        pyautogui.press('space')
-        print("Resumed Spotify")
-        return True
+        if focus_spotify():
+            pyautogui.press('space')
+            print("Resumed Spotify")
+            return True
+        else:
+            print("Failed to focus Spotify before resuming.")
+            return False
     except Exception as e:
         print(f"Error resuming Spotify: {e}")
         return False
 
-def check_audio_sessions_helper(audio_manager, check_spotify, queue):
+def check_audio_sessions_helper(check_spotify, queue):
     try:
+        audio_manager = AudioSessionManager()  # Instantiate within the child process
         result = audio_manager.check_audio_sessions(check_spotify)
         queue.put(result)
+        audio_manager.close()  # Explicitly call close to cleanup
     except Exception as e:
         queue.put(e)
+
+def get_audio_session_result(check_spotify):
+    queue = Queue()
+    p = Process(target=check_audio_sessions_helper, args=(check_spotify, queue))
+    p.start()
+    p.join(timeout=5)  # Set a timeout (e.g., 5 seconds)
+    if p.is_alive():
+        p.terminate()
+        print(f"{time.strftime('%H:%M:%S')} - check_audio_sessions timed out", flush=True)
+        return False  # Assume no active audio if timeout
+    if not queue.empty():
+        result = queue.get()
+        if isinstance(result, Exception):
+            print(f"{time.strftime('%H:%M:%S')} - Error in audio session check: {result}", flush=True)
+            return False
+        return result
+    return False
 
 def main():
     audio_manager = None
@@ -323,23 +424,6 @@ def main():
     last_status_time = 0
     status_interval = 5  # Show status every 5 seconds
 
-    def get_audio_session_result(audio_manager, check_spotify):
-        queue = Queue()
-        p = Process(target=check_audio_sessions_helper, args=(audio_manager, check_spotify, queue))
-        p.start()
-        p.join(timeout=5)  # Set a timeout (e.g., 5 seconds)
-        if p.is_alive():
-            p.terminate()
-            print(f"{time.strftime('%H:%M:%S')} - check_audio_sessions timed out", flush=True)
-            return False  # Assume no active audio if timeout
-        if not queue.empty():
-            result = queue.get()
-            if isinstance(result, Exception):
-                print(f"{time.strftime('%H:%M:%S')} - Error in audio session check: {result}", flush=True)
-                return False
-            return result
-        return False
-
     while True:
         try:
             if audio_manager is None:
@@ -354,10 +438,10 @@ def main():
                     print(f"{time.strftime('%H:%M:%S')} - Found Spotify process", flush=True)
                     try:
                         print(f"{time.strftime('%H:%M:%S')} - Checking other apps playing status", flush=True)
-                        other_apps_playing = get_audio_session_result(audio_manager, check_spotify=False)
+                        other_apps_playing = get_audio_session_result(check_spotify=False)  # Updated call
                         time.sleep(0.1)
                         print(f"{time.strftime('%H:%M:%S')} - Checking Spotify playing status", flush=True)
-                        spotify_playing = get_audio_session_result(audio_manager, check_spotify=True)
+                        spotify_playing = get_audio_session_result(check_spotify=True)  # Updated call
                         print(f"{time.strftime('%H:%M:%S')} - Initial state:", flush=True)
                         print(f"  Spotify playing: {spotify_playing}", flush=True)
                         print(f"  Other audio playing: {other_apps_playing}\n", flush=True)
@@ -373,9 +457,15 @@ def main():
             spotify_process = get_spotify_process()
             
             if spotify_process:
-                other_apps_playing = get_audio_session_result(audio_manager, check_spotify=False)
+                other_apps_playing = get_audio_session_result(check_spotify=False)  # Updated call
                 time.sleep(0.1)
-                spotify_playing = get_audio_session_result(audio_manager, check_spotify=True)
+                spotify_playing = get_audio_session_result(check_spotify=True)  # Updated call
+                
+                # Add clear debug start tag
+                if audio_manager._debug:
+                    print("=== DEBUG START ===", flush=True)
+                    print(f"{time.strftime('%H:%M:%S')} - other_apps_playing: {other_apps_playing}", flush=True)
+                    print(f"{time.strftime('%H:%M:%S')} - spotify_playing: {spotify_playing}", flush=True)
                 
                 # Show periodic status
                 if current_time - last_status_time >= status_interval:
@@ -391,12 +481,18 @@ def main():
                             print(f"\n{time.strftime('%H:%M:%S')} - Other audio detected, pausing Spotify...", flush=True)
                             if pause_spotify():
                                 spotify_was_playing = True
+                                print(f"{time.strftime('%H:%M:%S')} - Spotify paused successfully", flush=True)
                                 last_action_time = current_time
                     elif spotify_was_playing and not other_apps_playing:
                         print(f"\n{time.strftime('%H:%M:%S')} - No other audio, resuming Spotify...", flush=True)
                         if play_spotify():
                             spotify_was_playing = False
+                            print(f"{time.strftime('%H:%M:%S')} - Spotify resumed successfully", flush=True)
                             last_action_time = current_time
+                
+                # Add clear debug end tag
+                if audio_manager._debug:
+                    print("=== DEBUG END ===", flush=True)
             
             time.sleep(0.2)
             sys.stdout.flush()  # Force flush output
