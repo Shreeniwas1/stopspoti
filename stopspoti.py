@@ -153,7 +153,7 @@ class AudioSessionManager:
             found_active = False
             
             # Only ignore system processes
-            IGNORED_PROCESSES = {'system idle process', 'system', 'explorer.exe'}  # Using set for faster lookup
+            IGNORED_PROCESSES = {'system idle process', 'system', 'explorer.exe','FxSound.exe','FxSound','fxsound.exe'}  # Using set for faster lookup
             
             # Define identifiers for Spotify and Spotify Premium
             SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium']
