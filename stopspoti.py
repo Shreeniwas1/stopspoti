@@ -155,6 +155,9 @@ class AudioSessionManager:
             # Only ignore system processes
             IGNORED_PROCESSES = {'system idle process', 'system', 'explorer.exe'}  # Using set for faster lookup
             
+            # Define identifiers for Spotify and Spotify Premium
+            SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium']
+            
             if self._debug:
                 print(f"\n{'=' * 50}", flush=True)
                 print(f"Checking {'Spotify' if check_spotify else 'other apps'} audio:", flush=True)
@@ -215,7 +218,8 @@ class AudioSessionManager:
                         print(f"{time.strftime('%H:%M:%S')} - Ignored process: {process_name}", flush=True)
                         continue
                         
-                    is_spotify = 'spotify' in process_name
+                    # Check for both Spotify and Spotify Premium
+                    is_spotify = any(identifier in process_name for identifier in SPOTIFY_IDENTIFIERS)
                     
                     if check_spotify != is_spotify:
                         print(f"{time.strftime('%H:%M:%S')} - Skipping {'Spotify' if not is_spotify else 'other app'}: {process_name}", flush=True)
@@ -256,9 +260,14 @@ class AudioSessionManager:
             return False
 
 def get_spotify_process():
+    # Define identifiers for Spotify and Spotify Premium
+    SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium']
+    
     for proc in psutil.process_iter(['name']):
-        if proc.info['name'] and 'spotify' in proc.info['name'].lower():
-            return proc
+        if proc.info['name']:
+            proc_name_lower = proc.info['name'].lower()
+            if any(identifier in proc_name_lower for identifier in SPOTIFY_IDENTIFIERS):
+                return proc
     return None
 
 def focus_spotify():
@@ -266,7 +275,7 @@ def focus_spotify():
         import win32gui
         import win32process
         import win32con
-        import win32api
+        import win32api  # Ensure win32api is imported
 
         spotify_hwnd = None
 
@@ -286,16 +295,25 @@ def focus_spotify():
             try:
                 win32gui.EnumWindows(callback, spotify_process.pid)
             except Exception as e:
-                if isinstance(e, OSError) and e.winerror == 126:
-                    print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed: {e}", flush=True)
-                    print("Please ensure that pywin32 is correctly installed and all dependencies are present.", flush=True)
+                if isinstance(e, OSError):
+                    if hasattr(e, 'winerror'):
+                        if e.winerror == 126:
+                            print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed: {e}", flush=True)
+                            print("Please ensure that pywin32 is correctly installed and all dependencies are present.", flush=True)
+                        elif e.winerror == 2:
+                            print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed: {e}", flush=True)
+                            print("The system cannot find the file specified. Please verify your pywin32 installation.", flush=True)
+                        else:
+                            print(f"{time.strftime('%H:%M:%S')} - EnumWindows exception: {e}", flush=True)
+                    else:
+                        print(f"{time.strftime('%H:%M:%S')} - EnumWindows exception: {e}", flush=True)
                 else:
                     print(f"{time.strftime('%H:%M:%S')} - EnumWindows exception: {e}", flush=True)
                 return False
 
             if spotify_hwnd:
                 fg_window = win32gui.GetForegroundWindow()
-                current_thread_id = win32process.GetCurrentThreadId()
+                current_thread_id = win32api.GetCurrentThreadId()  # Updated to use win32api
                 fg_thread_id, _ = win32process.GetWindowThreadProcessId(fg_window)
                 target_thread_id = win32process.GetWindowThreadProcessId(spotify_hwnd)[0]
 
