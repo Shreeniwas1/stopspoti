@@ -1,5 +1,6 @@
 import psutil
 import time
+import os
 from comtypes import *
 import pycaw.pycaw as pycaw
 import pyautogui
@@ -27,13 +28,13 @@ class AudioSessionManager:
         self._session_manager = None
         self._sessions = None
         self._last_check = 0
-        self._cache_timeout = 1  # Refresh cache every 1 second
+        self._cache_timeout = 2  # Increased from 1 to 2 seconds for better performance
         self._debug = True  # Add debug flag
         self._peak_threshold = 0.0005  # Increased threshold for better detection
         self._initialized = False
         self._com_initialized = False
         self._last_log_time = 0  # Add last log time
-        self._log_interval = 1  # Set log interval to 1 second
+        self._log_interval = 5   # Increased from 1 to 5 seconds to reduce log spam
         try:
             pythoncom.CoInitialize()
             self._com_initialized = True
@@ -438,6 +439,9 @@ def get_audio_session_result(check_spotify):
             p.terminate()
     return False
 
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
 def main():
     # Set process priority to below normal to reduce resource usage
     if hasattr(sys, 'frozen'):
@@ -451,12 +455,10 @@ def main():
     def cleanup():
         nonlocal audio_manager
         if audio_manager:
-            print("\nCleaning up resources...", flush=True)
             del audio_manager
             audio_manager = None
 
     def signal_handler(signum, frame):
-        print("\nSignal received, shutting down...", flush=True)
         cleanup()
         sys.exit(0)
 
@@ -465,94 +467,50 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     atexit.register(cleanup)
 
-    print(f"\n{time.strftime('%H:%M:%S')} - Starting Spotify Audio Monitor...", flush=True)
-    print("Press Ctrl+C to exit", flush=True)
+    print("Program is running. ", flush=True)
     
     spotify_was_playing = False
     last_action_time = 0
-    action_cooldown = 0.5  # Reduced cooldown
-    last_status_time = 0
-    status_interval = 5  # Show status every 5 seconds
+    action_cooldown = 1.0  # Increased from 0.5 to 1.0 second to prevent rapid switching
 
     while True:
         try:
+            clear_screen()
+            print("Program is running.", flush=True)
+            
             if audio_manager is None:
                 audio_manager = AudioSessionManager()
                 if not audio_manager._com_initialized:
                     raise Exception("Failed to initialize COM")
-                print(f"{time.strftime('%H:%M:%S')} - Audio manager initialized", flush=True)
-                
-                # Force initial state check
-                spotify_process = get_spotify_process()
-                if spotify_process:
-                    print(f"{time.strftime('%H:%M:%S')} - Found Spotify process", flush=True)
-                    try:
-                        print(f"{time.strftime('%H:%M:%S')} - Checking other apps playing status", flush=True)
-                        other_apps_playing = get_audio_session_result(check_spotify=False)  # Updated call
-                        time.sleep(0.1)
-                        print(f"{time.strftime('%H:%M:%S')} - Checking Spotify playing status", flush=True)
-                        spotify_playing = get_audio_session_result(check_spotify=True)  # Updated call
-                        print(f"{time.strftime('%H:%M:%S')} - Initial state:", flush=True)
-                        print(f"  Spotify playing: {spotify_playing}", flush=True)
-                        print(f"  Other audio playing: {other_apps_playing}\n", flush=True)
-                    except Exception as e:
-                        print(f"{time.strftime('%H:%M:%S')} - Error during initial audio check: {e}", flush=True)
-                        raise
-                else:
-                    print(f"{time.strftime('%H:%M:%S')} - Spotify is not running\n", flush=True)
-                
                 time.sleep(0.5)
             
             current_time = time.time()
             spotify_process = get_spotify_process()
             
             if spotify_process:
-                other_apps_playing = get_audio_session_result(check_spotify=False)  # Updated call
-                time.sleep(0.1)
-                spotify_playing = get_audio_session_result(check_spotify=True)  # Updated call
-                
-                # Add clear debug start tag
-                if audio_manager._debug:
-                    print("=== DEBUG START ===", flush=True)
-                    print(f"{time.strftime('%H:%M:%S')} - other_apps_playing: {other_apps_playing}", flush=True)
-                    print(f"{time.strftime('%H:%M:%S')} - spotify_playing: {spotify_playing}", flush=True)
-                
-                # Show periodic status
-                if current_time - last_status_time >= status_interval:
-                    print(f"\n{time.strftime('%H:%M:%S')} - Status:", flush=True)
-                    print(f"  Spotify playing: {spotify_playing}", flush=True)
-                    print(f"  Other audio: {other_apps_playing}", flush=True)
-                    print(f"  Was playing: {spotify_was_playing}\n", flush=True)
-                    last_status_time = current_time
+                other_apps_playing = get_audio_session_result(check_spotify=False)
+                time.sleep(0.25)  # Increased from 0.1 to 0.25 for better stability
+                spotify_playing = get_audio_session_result(check_spotify=True)
                 
                 if current_time - last_action_time >= action_cooldown:
                     if other_apps_playing and spotify_playing:
                         if not spotify_was_playing:
-                            print(f"\n{time.strftime('%H:%M:%S')} - Other audio detected, pausing Spotify...", flush=True)
                             if pause_spotify():
                                 spotify_was_playing = True
-                                print(f"{time.strftime('%H:%M:%S')} - Spotify paused successfully", flush=True)
                                 last_action_time = current_time
                     elif spotify_was_playing and not other_apps_playing:
-                        print(f"\n{time.strftime('%H:%M:%S')} - No other audio, resuming Spotify...", flush=True)
                         if play_spotify():
                             spotify_was_playing = False
-                            print(f"{time.strftime('%H:%M:%S')} - Spotify resumed successfully", flush=True)
                             last_action_time = current_time
-                
-                # Add clear debug end tag
-                if audio_manager._debug:
-                    print("=== DEBUG END ===", flush=True)
             
-            time.sleep(0.2)
-            sys.stdout.flush()  # Force flush output
+            time.sleep(0.5)  # Increased from 0.2 to 0.5 to reduce CPU usage
+            sys.stdout.flush()
             
         except Exception as e:
-            print(f"\n{time.strftime('%H:%M:%S')} - Error: {e}", flush=True)
             if audio_manager:
                 del audio_manager
                 audio_manager = None
-            time.sleep(1)
+            time.sleep(2)  # Increased from 1 to 2 seconds on error
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
