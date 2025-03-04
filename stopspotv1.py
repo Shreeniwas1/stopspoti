@@ -154,7 +154,13 @@ class AudioSessionManager:
             found_active = False
             
             # Only ignore system processes
-            IGNORED_PROCESSES = {'system idle process', 'system', 'explorer.exe','FxSound.exe','FxSound','fxsound.exe'}  # Using set for faster lookup
+            IGNORED_PROCESSES = {
+                'system idle process', 'system', 'explorer.exe',
+                'FxSound.exe', 'FxSound', 'fxsound.exe', 
+                'obs64.exe', 'obs32.exe', 'obs.exe', 'obs-browser-page.exe',
+                'SnippingTool.exe', 'ScreenClippingHost.exe',  # Windows Snipping Tool processes
+                'ScreenClipping.exe'
+            }
             
             # Define identifiers for Spotify and Spotify Premium
             SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium']
