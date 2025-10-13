@@ -10,8 +10,17 @@ from threading import RLock
 import sys
 import signal
 import atexit
-import multiprocessing
-from multiprocessing import Process, Queue
+import threading
+import customtkinter as ctk
+from PIL import Image
+import pystray
+
+# Add audio session state constants
+AUDCLNT_SESSIONSTATE_ACTIVE = 1
+AUDCLNT_SESSIONSTATE_INACTIVE = 2
+AUDCLNT_SESSIONSTATE_EXPIRED = 3
+
+from comtypes import CLSCTX_ALL  # Ensure CLSCTX_ALL is imported
 
 # Add audio session state constants
 AUDCLNT_SESSIONSTATE_ACTIVE = 1
@@ -21,20 +30,27 @@ AUDCLNT_SESSIONSTATE_EXPIRED = 3
 from comtypes import CLSCTX_ALL  # Ensure CLSCTX_ALL is imported
 
 class AudioSessionManager:
-    def __init__(self):
+    def __init__(self, peak_threshold=0.0005, cache_timeout=2, log_interval=5, debug=True, ignored_processes=None):
         self._lock = RLock()  # Initialize RLock
         self._devices = None
         self._interface = None
         self._session_manager = None
         self._sessions = None
         self._last_check = 0
-        self._cache_timeout = 2  # Increased from 1 to 2 seconds for better performance
-        self._debug = True  # Add debug flag
-        self._peak_threshold = 0.0005  # Increased threshold for better detection
+        self._cache_timeout = cache_timeout
+        self._debug = debug
+        self._peak_threshold = peak_threshold
         self._initialized = False
         self._com_initialized = False
-        self._last_log_time = 0  # Add last log time
-        self._log_interval = 5   # Increased from 1 to 5 seconds to reduce log spam
+        self._last_log_time = 0
+        self._log_interval = log_interval
+        self._ignored_processes = set(proc.lower() for proc in (ignored_processes or [
+            'system idle process', 'system', 'explorer.exe',
+            'FxSound.exe', 'FxSound', 'fxsound.exe', 
+            'obs64.exe', 'obs32.exe', 'obs.exe', 'obs-browser-page.exe',
+            'SnippingTool.exe', 'ScreenClippingHost.exe',
+            'ScreenClipping.exe'
+        ]))
         try:
             pythoncom.CoInitialize()
             self._com_initialized = True
@@ -149,18 +165,10 @@ class AudioSessionManager:
                 print(f"{time.strftime('%H:%M:%S')} - Audio sessions not initialized properly", flush=True)
                 return False
 
+            # Only ignore system processes
             count = self._sessions.GetCount()
             print(f"{time.strftime('%H:%M:%S')} - Number of audio sessions: {count}", flush=True)
             found_active = False
-            
-            # Only ignore system processes
-            IGNORED_PROCESSES = {
-                'system idle process', 'system', 'explorer.exe',
-                'FxSound.exe', 'FxSound', 'fxsound.exe', 
-                'obs64.exe', 'obs32.exe', 'obs.exe', 'obs-browser-page.exe',
-                'SnippingTool.exe', 'ScreenClippingHost.exe',  # Windows Snipping Tool processes
-                'ScreenClipping.exe'
-            }
             
             # Define identifiers for Spotify and Spotify Premium
             SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium']
@@ -221,7 +229,7 @@ class AudioSessionManager:
                         print(f"{time.strftime('%H:%M:%S')} - Error retrieving process for PID {process_id}: {e}", flush=True)
                         continue
                     
-                    if process_name in IGNORED_PROCESSES:
+                    if process_name in self._ignored_processes:
                         print(f"{time.strftime('%H:%M:%S')} - Ignored process: {process_name}", flush=True)
                         continue
                         
@@ -390,60 +398,254 @@ def play_spotify():
         print(f"Error resuming Spotify: {e}")
         return False
 
-def check_audio_sessions_helper(check_spotify, queue):
-    try:
-        # Create a no-window flag for the subprocess
-        if hasattr(sys, 'frozen'):
-            # Prevent showing console window
-            import win32process
-            import win32con
-            import win32api
-            win32api.SetConsoleCtrlHandler(None, True)
-            win32process.SetPriorityClass(win32api.GetCurrentProcess(), win32process.BELOW_NORMAL_PRIORITY_CLASS)
-
-        audio_manager = AudioSessionManager()
-        result = audio_manager.check_audio_sessions(check_spotify)
-        queue.put(result)
-        audio_manager.close()
-    except Exception as e:
-        queue.put(e)
-
-def get_audio_session_result(check_spotify):
-    queue = Queue()
-    
-    if hasattr(sys, 'frozen'):
-        # When running as exe, use a different approach for creating the process
-        import win32process
-        import win32con
-        p = Process(target=check_audio_sessions_helper, args=(check_spotify, queue))
-        # Set process creation flags before starting
-        if hasattr(multiprocessing, 'get_start_method') and multiprocessing.get_start_method() == 'spawn':
-            p._config['creationflags'] = win32process.CREATE_NO_WINDOW
-        p.daemon = True
-    else:
-        # Normal process creation for non-frozen code
-        p = Process(target=check_audio_sessions_helper, args=(check_spotify, queue))
-
-    try:
-        p.start()
-        p.join(timeout=5)  # Wait up to 5 seconds
+class SpotifyControllerGUI:
+    def __init__(self):
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")  # We'll customize colors
         
-        if p.is_alive():
-            p.terminate()
-            print(f"{time.strftime('%H:%M:%S')} - check_audio_sessions timed out", flush=True)
+        self.root = ctk.CTk()
+        self.root.title("Spotify Auto Controller")
+        self.root.geometry("600x700")
+        self.root.configure(bg="#000000")  # Black background
+        
+        # Set window icon if available
+        try:
+            self.root.iconbitmap("icon.ico")
+        except:
+            pass  # Icon not found, continue without
+        
+        # Custom colors
+        self.bg_color = "#000000"  # Black
+        self.fg_color = "#00FF00"  # Green
+        self.accent_color = "#800080"  # Purple
+        
+        # Settings
+        self.peak_threshold = ctk.DoubleVar(value=0.0005)
+        self.cache_timeout = ctk.IntVar(value=2)
+        self.log_interval = ctk.IntVar(value=5)
+        self.action_cooldown = ctk.DoubleVar(value=1.0)
+        self.debug = ctk.BooleanVar(value=True)
+        self.ignored_processes = [
+            'system idle process', 'system', 'explorer.exe',
+            'FxSound.exe', 'FxSound', 'fxsound.exe', 
+            'obs64.exe', 'obs32.exe', 'obs.exe', 'obs-browser-page.exe',
+            'SnippingTool.exe', 'ScreenClippingHost.exe',
+            'ScreenClipping.exe'
+        ]
+        
+        self.monitoring = False
+        self.monitor_thread = None
+        self.audio_manager = None
+        
+        self.create_widgets()
+        
+    def create_widgets(self):
+        # Title
+        title_label = ctk.CTkLabel(self.root, text="Spotify Auto Controller", font=ctk.CTkFont(size=20, weight="bold"), text_color=self.fg_color)
+        title_label.pack(pady=10)
+        
+        # Settings Frame
+        settings_frame = ctk.CTkFrame(self.root, fg_color=self.bg_color, border_color=self.accent_color, border_width=2)
+        settings_frame.pack(pady=10, padx=20, fill="x")
+        
+        ctk.CTkLabel(settings_frame, text="Settings", font=ctk.CTkFont(size=16, weight="bold"), text_color=self.fg_color).pack(pady=5)
+        
+        # Peak Threshold
+        threshold_frame = ctk.CTkFrame(settings_frame, fg_color=self.bg_color)
+        threshold_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(threshold_frame, text="Peak Threshold:", text_color=self.fg_color).pack(side="left")
+        threshold_entry = ctk.CTkEntry(threshold_frame, textvariable=self.peak_threshold, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        threshold_entry.pack(side="right", padx=(10,0))
+        
+        # Cache Timeout
+        cache_frame = ctk.CTkFrame(settings_frame, fg_color=self.bg_color)
+        cache_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(cache_frame, text="Cache Timeout (s):", text_color=self.fg_color).pack(side="left")
+        cache_entry = ctk.CTkEntry(cache_frame, textvariable=self.cache_timeout, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        cache_entry.pack(side="right", padx=(10,0))
+        
+        # Log Interval
+        log_frame = ctk.CTkFrame(settings_frame, fg_color=self.bg_color)
+        log_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(log_frame, text="Log Interval (s):", text_color=self.fg_color).pack(side="left")
+        log_entry = ctk.CTkEntry(log_frame, textvariable=self.log_interval, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        log_entry.pack(side="right", padx=(10,0))
+        
+        # Action Cooldown
+        cooldown_frame = ctk.CTkFrame(settings_frame, fg_color=self.bg_color)
+        cooldown_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(cooldown_frame, text="Action Cooldown (s):", text_color=self.fg_color).pack(side="left")
+        cooldown_entry = ctk.CTkEntry(cooldown_frame, textvariable=self.action_cooldown, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        cooldown_entry.pack(side="right", padx=(10,0))
+        
+        # Debug Mode
+        debug_check = ctk.CTkCheckBox(settings_frame, text="Debug Mode", variable=self.debug, fg_color=self.accent_color, text_color=self.fg_color)
+        debug_check.pack(pady=5)
+        
+        # Ignored Processes
+        ignored_label = ctk.CTkLabel(settings_frame, text="Ignored Processes:", text_color=self.fg_color)
+        ignored_label.pack(pady=5)
+        self.ignored_text = ctk.CTkTextbox(settings_frame, height=100, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        self.ignored_text.pack(fill="x", padx=10, pady=5)
+        self.ignored_text.insert("0.0", "\n".join(self.ignored_processes))
+        
+        # Control Buttons
+        control_frame = ctk.CTkFrame(self.root, fg_color=self.bg_color, border_color=self.accent_color, border_width=2)
+        control_frame.pack(pady=10, padx=20, fill="x")
+        
+        self.start_button = ctk.CTkButton(control_frame, text="Start Monitoring", command=self.start_monitoring, fg_color=self.accent_color, text_color=self.fg_color)
+        self.start_button.pack(side="left", padx=10, pady=10)
+        
+        self.stop_button = ctk.CTkButton(control_frame, text="Stop Monitoring", command=self.stop_monitoring, state="disabled", fg_color=self.accent_color, text_color=self.fg_color)
+        self.stop_button.pack(side="right", padx=10, pady=10)
+        
+        # Status
+        self.status_label = ctk.CTkLabel(self.root, text="Status: Stopped", text_color=self.fg_color)
+        self.status_label.pack(pady=10)
+        
+        # Log
+        log_label = ctk.CTkLabel(self.root, text="Log:", text_color=self.fg_color)
+        log_label.pack()
+        self.log_text = ctk.CTkTextbox(self.root, height=200, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        self.log_text.pack(fill="both", expand=True, padx=20, pady=(0,20))
+        
+    def log(self, message):
+        timestamp = time.strftime('%H:%M:%S')
+        self.log_text.insert("end", f"[{timestamp}] {message}\n")
+        self.log_text.see("end")
+        
+    def start_monitoring(self):
+        if self.monitoring:
+            return
+        
+        # Update settings
+        self.ignored_processes = [line.strip() for line in self.ignored_text.get("0.0", "end").split("\n") if line.strip()]
+        
+        self.audio_manager = AudioSessionManager(
+            peak_threshold=self.peak_threshold.get(),
+            cache_timeout=self.cache_timeout.get(),
+            log_interval=self.log_interval.get(),
+            debug=self.debug.get(),
+            ignored_processes=self.ignored_processes
+        )
+        
+        if not self.audio_manager._com_initialized:
+            self.log("Failed to initialize COM")
+            return
+        
+        self.monitoring = True
+        self.start_button.configure(state="disabled")
+        self.stop_button.configure(state="normal")
+        self.status_label.configure(text="Status: Running")
+        
+        self.monitor_thread = threading.Thread(target=self.monitor_loop, daemon=True)
+        self.monitor_thread.start()
+        
+        self.log("Monitoring started")
+        
+    def stop_monitoring(self):
+        if not self.monitoring:
+            return
+        
+        self.monitoring = False
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=2)  # Wait up to 2 seconds for thread to finish
+            if self.monitor_thread.is_alive():
+                print("Warning: Monitoring thread did not stop gracefully", flush=True)
+        
+        if self.audio_manager:
+            try:
+                self.audio_manager.close()
+            except Exception as e:
+                print(f"Error closing audio manager: {e}", flush=True)
+            self.audio_manager = None
+        
+        self.start_button.configure(state="normal")
+        self.stop_button.configure(state="disabled")
+        self.status_label.configure(text="Status: Stopped")
+        
+        self.log("Monitoring stopped")
+        
+    def monitor_loop(self):
+        spotify_was_playing = False
+        last_action_time = 0
+        action_cooldown = self.action_cooldown.get()
+        
+        while self.monitoring:
+            try:
+                current_time = time.time()
+                spotify_process = get_spotify_process()
+                
+                if spotify_process:
+                    other_apps_playing = get_audio_session_result(
+                        check_spotify=False,
+                        peak_threshold=self.peak_threshold.get(),
+                        cache_timeout=self.cache_timeout.get(),
+                        log_interval=self.log_interval.get(),
+                        debug=self.debug.get(),
+                        ignored_processes=self.ignored_processes
+                    )
+                    time.sleep(0.25)
+                    spotify_playing = get_audio_session_result(
+                        check_spotify=True,
+                        peak_threshold=self.peak_threshold.get(),
+                        cache_timeout=self.cache_timeout.get(),
+                        log_interval=self.log_interval.get(),
+                        debug=self.debug.get(),
+                        ignored_processes=self.ignored_processes
+                    )
+                    
+                    if current_time - last_action_time >= action_cooldown:
+                        if other_apps_playing and spotify_playing:
+                            if not spotify_was_playing:
+                                if pause_spotify():
+                                    spotify_was_playing = True
+                                    last_action_time = current_time
+                                    self.log("Paused Spotify")
+                        elif spotify_was_playing and not other_apps_playing:
+                            if play_spotify():
+                                spotify_was_playing = False
+                                last_action_time = current_time
+                                self.log("Resumed Spotify")
+                
+                time.sleep(0.5)
+                
+            except Exception as e:
+                error_msg = f"Error in monitoring loop: {e}"
+                print(error_msg, flush=True)  # Also print to console for debugging
+                self.log(error_msg)
+                time.sleep(2)  # Wait longer on error to prevent rapid restarts
+        
+    def run(self):
+        try:
+            self.root.mainloop()
+        except Exception as e:
+            print(f"Critical GUI error: {e}", flush=True)
+            # Don't restart, just exit gracefully
+            sys.exit(1)
+
+def get_audio_session_result(check_spotify, peak_threshold=0.0005, cache_timeout=2, log_interval=5, debug=True, ignored_processes=None):
+    """Get audio session result using direct call instead of subprocess to avoid cursor loading"""
+    try:
+        audio_manager = AudioSessionManager(
+            peak_threshold=peak_threshold,
+            cache_timeout=cache_timeout,
+            log_interval=log_interval,
+            debug=debug,
+            ignored_processes=ignored_processes
+        )
+        
+        if not audio_manager._com_initialized:
+            print(f"{time.strftime('%H:%M:%S')} - COM not initialized in direct call", flush=True)
             return False
             
-        if not queue.empty():
-            result = queue.get()
-            if isinstance(result, Exception):
-                print(f"{time.strftime('%H:%M:%S')} - Error in audio session check: {result}", flush=True)
-                return False
-            return result
+        result = audio_manager.check_audio_sessions(check_spotify)
+        audio_manager.close()
+        return result
+        
     except Exception as e:
-        print(f"{time.strftime('%H:%M:%S')} - Process error: {e}", flush=True)
-        if p.is_alive():
-            p.terminate()
-    return False
+        print(f"{time.strftime('%H:%M:%S')} - Direct audio check error: {e}", flush=True)
+        return False
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -456,73 +658,90 @@ def main():
         win32api.SetConsoleCtrlHandler(None, True)
         win32process.SetPriorityClass(win32api.GetCurrentProcess(), win32process.BELOW_NORMAL_PRIORITY_CLASS)
 
-    audio_manager = None
-    
-    def cleanup():
-        nonlocal audio_manager
-        if audio_manager:
-            del audio_manager
-            audio_manager = None
-
-    def signal_handler(signum, frame):
-        cleanup()
+    # Check if running in test mode
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        print("Running in test mode for 10 seconds...")
+        test_resource_usage()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--gui-only":
+        print("Running GUI only (no monitoring)...")
+        app = SpotifyControllerGUI()
+        app.run()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--version":
+        print("Spotify Auto Controller v1.0")
+        print("Built with PyInstaller")
         sys.exit(0)
+    else:
+        app = SpotifyControllerGUI()
+        app.run()
 
-    # Register cleanup handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    atexit.register(cleanup)
-
-    print("Program is running. ", flush=True)
+def test_resource_usage():
+    """Test function to run monitoring for 30 seconds and measure resource usage"""
+    import psutil as psutil_monitor
+    import os
+    
+    print(f"Process ID: {os.getpid()}")
+    print("Starting resource monitoring test...")
+    
+    audio_manager = AudioSessionManager()
+    if not audio_manager._com_initialized:
+        print("Failed to initialize COM")
+        return
     
     spotify_was_playing = False
     last_action_time = 0
-    action_cooldown = 1.0  # Increased from 0.5 to 1.0 second to prevent rapid switching
-
-    while True:
+    action_cooldown = 1.0
+    
+    start_time = time.time()
+    end_time = start_time + 30  # Run for 30 seconds
+    
+    process = psutil_monitor.Process(os.getpid())
+    
+    while time.time() < end_time:
         try:
-            clear_screen()
-            print("Program is running.", flush=True)
-            
-            if audio_manager is None:
-                audio_manager = AudioSessionManager()
-                if not audio_manager._com_initialized:
-                    raise Exception("Failed to initialize COM")
-                time.sleep(0.5)
-            
             current_time = time.time()
+            
+            # Get current resource usage
+            cpu_percent = process.cpu_percent(interval=0.1)
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            
+            if int(current_time - start_time) % 5 == 0:  # Log every 5 seconds
+                print(f"Time: {current_time - start_time:.1f}s | CPU: {cpu_percent:.1f}% | Memory: {memory_mb:.1f} MB")
+            
             spotify_process = get_spotify_process()
             
             if spotify_process:
                 other_apps_playing = get_audio_session_result(check_spotify=False)
-                time.sleep(0.25)  # Increased from 0.1 to 0.25 for better stability
+                time.sleep(0.25)
                 spotify_playing = get_audio_session_result(check_spotify=True)
                 
                 if current_time - last_action_time >= action_cooldown:
                     if other_apps_playing and spotify_playing:
                         if not spotify_was_playing:
-                            if pause_spotify():
-                                spotify_was_playing = True
-                                last_action_time = current_time
+                            # Don't actually pause, just simulate
+                            spotify_was_playing = True
+                            last_action_time = current_time
+                            print("Would pause Spotify")
                     elif spotify_was_playing and not other_apps_playing:
-                        if play_spotify():
+                        if not other_apps_playing:  # Only resume if no other audio
                             spotify_was_playing = False
                             last_action_time = current_time
+                            print("Would resume Spotify")
             
-            time.sleep(0.5)  # Increased from 0.2 to 0.5 to reduce CPU usage
-            sys.stdout.flush()
+            time.sleep(0.5)
             
         except Exception as e:
-            if audio_manager:
-                del audio_manager
-                audio_manager = None
-            time.sleep(2)  # Increased from 1 to 2 seconds on error
+            print(f"Error: {e}")
+            time.sleep(2)
+    
+    # Final resource usage
+    final_cpu = process.cpu_percent(interval=0.1)
+    final_memory = process.memory_info().rss / 1024 / 1024
+    print(f"\nFinal resource usage after 30 seconds:")
+    print(f"CPU: {final_cpu:.1f}%")
+    print(f"Memory: {final_memory:.1f} MB")
+    
+    audio_manager.close()
+    print("Test completed.")
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
-    try:
-        multiprocessing.set_start_method('spawn')
-    except RuntimeError:
-        # Already set, ignore
-        pass
     main()
