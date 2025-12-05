@@ -354,92 +354,49 @@ def focus_spotify():
         print(f"Error focusing Spotify: {e}", flush=True)
         return False
 
-def mute_spotify_session(mute=True):
-    """Mute/unmute Spotify audio session via WASAPI - no GUI interaction needed"""
+def pause_spotify():
     try:
-        # Initialize COM for this thread
-        pythoncom.CoInitialize()
-        
-        # Get all audio sessions
-        devices = pycaw.AudioUtilities.GetSpeakers()
-        interface = devices.Activate(
-            pycaw.IAudioSessionManager2._iid_,
-            CLSCTX_ALL,
-            None
-        )
-        session_manager = cast(interface, POINTER(pycaw.IAudioSessionManager2))
-        sessions = session_manager.GetSessionEnumerator()
-        
-        # Update Spotify PIDs in case they changed
-        global SPOTIFY_PIDS
-        SPOTIFY_PIDS = [proc.pid for proc in get_spotify_processes()]
-        
-        SPOTIFY_IDENTIFIERS = ['spotify', 'spotify premium']
-        found_spotify = False
-        
-        for i in range(sessions.GetCount()):
-            session = None
-            audio_session = None
-            volume = None
-            
+        pyautogui.PAUSE = 0.1
+        if focus_spotify():
+            pyautogui.press('space')
+            # Minimize the Spotify window
             try:
-                session = sessions.GetSession(i)
-                if not session:
-                    continue
-                
-                audio_session = session.QueryInterface(pycaw.IAudioSessionControl2)
-                process_id = audio_session.GetProcessId()
-                
-                try:
-                    process = psutil.Process(process_id)
-                    process_name = process.name().lower()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-                
-                # Check if this is Spotify
-                is_spotify = any(identifier in process_name for identifier in SPOTIFY_IDENTIFIERS)
-                
-                if is_spotify:
-                    volume = session.QueryInterface(pycaw.ISimpleAudioVolume)
-                    volume.SetMute(mute, None)
-                    action = "Muted" if mute else "Unmuted"
-                    print(f"{time.strftime('%H:%M:%S')} - {action} Spotify (PID: {process_id}) via WASAPI", flush=True)
-                    found_spotify = True
-                    
+                import win32gui
+                import win32con
+                spotify_hwnd = win32gui.GetForegroundWindow()
+                win32gui.ShowWindow(spotify_hwnd, win32con.SW_MINIMIZE)
             except Exception as e:
-                print(f"{time.strftime('%H:%M:%S')} - Error processing session {i}: {e}", flush=True)
-            finally:
-                # Release COM objects
-                for obj in (volume, audio_session, session):
-                    if obj:
-                        try:
-                            obj.Release()
-                        except:
-                            pass
-        
-        pythoncom.CoUninitialize()
-        
-        if not found_spotify:
-            print(f"{time.strftime('%H:%M:%S')} - Spotify audio session not found", flush=True)
+                print(f"Error minimizing Spotify window: {e}")
+            print("Paused Spotify")
+            return True
+        else:
+            print("Failed to focus Spotify before pausing.")
             return False
-            
-        return True
-        
     except Exception as e:
-        print(f"{time.strftime('%H:%M:%S')} - Error {'muting' if mute else 'unmuting'} Spotify via WASAPI: {e}", flush=True)
-        try:
-            pythoncom.CoUninitialize()
-        except:
-            pass
+        print(f"Error pausing Spotify: {e}")
         return False
 
-def pause_spotify():
-    """Pause Spotify by muting its audio session"""
-    return mute_spotify_session(mute=True)
-
 def play_spotify():
-    """Resume Spotify by unmuting its audio session"""
-    return mute_spotify_session(mute=False)
+    try:
+        pyautogui.PAUSE = 0.1
+        if focus_spotify():
+            pyautogui.press('space')
+            # Minimize the Spotify window
+            try:
+                import win32gui
+                import win32con
+                spotify_hwnd = win32gui.GetForegroundWindow()
+                win32gui.ShowWindow(spotify_hwnd, win32con.SW_MINIMIZE)
+            except Exception as e:
+                print(f"Error minimizing Spotify window: {e}")
+            print("Resumed Spotify")
+            return True
+        else:
+            print("Failed to focus Spotify before resuming.")
+            return False
+    except Exception as e:
+        print(f"Error resuming Spotify: {e}")
+        return False
 
 class SpotifyControllerGUI:
     def __init__(self):
