@@ -1,9 +1,9 @@
 import psutil
 import time
 import os
+import ctypes
 from comtypes import *
 import pycaw.pycaw as pycaw
-import pyautogui
 import pythoncom
 # from threading import Lock
 from threading import RLock
@@ -49,7 +49,8 @@ class AudioSessionManager:
             'FxSound.exe', 'FxSound', 'fxsound.exe', 
             'obs64.exe', 'obs32.exe', 'obs.exe', 'obs-browser-page.exe',
             'SnippingTool.exe', 'ScreenClippingHost.exe',
-            'ScreenClipping.exe'
+            'ScreenClipping.exe',
+            'audiodg.exe',  # Windows Audio Device Graph - proxy for all audio, ignore it
         ]))
         try:
             pythoncom.CoInitialize()
@@ -354,48 +355,89 @@ def focus_spotify():
         print(f"Error focusing Spotify: {e}", flush=True)
         return False
 
-def pause_spotify():
+# Windows AppCommand constants for media control
+APPCOMMAND_MEDIA_PLAY_PAUSE = 14
+APPCOMMAND_MEDIA_PLAY = 46
+APPCOMMAND_MEDIA_PAUSE = 47
+WM_APPCOMMAND = 0x0319
+
+def get_spotify_hwnd():
+    """Get Spotify's main window handle without focusing it"""
     try:
-        pyautogui.PAUSE = 0.1
-        if focus_spotify():
-            pyautogui.press('space')
-            # Minimize the Spotify window
+        import win32gui
+        import win32process
+        
+        spotify_hwnd = None
+        
+        def callback(hwnd, _):
+            nonlocal spotify_hwnd
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
             try:
-                import win32gui
-                import win32con
-                spotify_hwnd = win32gui.GetForegroundWindow()
-                win32gui.ShowWindow(spotify_hwnd, win32con.SW_MINIMIZE)
-            except Exception as e:
-                print(f"Error minimizing Spotify window: {e}")
-            print("Paused Spotify")
+                _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
+                if window_pid in SPOTIFY_PIDS:
+                    # Check if it's the main Spotify window (has a title)
+                    title = win32gui.GetWindowText(hwnd)
+                    if title and 'GDI+' not in title:  # Filter out helper windows
+                        spotify_hwnd = hwnd
+                        return False
+            except:
+                pass
+            return True
+        
+        win32gui.EnumWindows(callback, None)
+        return spotify_hwnd
+    except Exception as e:
+        print(f"Error getting Spotify hwnd: {e}", flush=True)
+        return None
+
+def send_appcommand_to_spotify(command):
+    """Send media command directly to Spotify window without stealing focus"""
+    try:
+        import win32api
+        import win32gui
+        
+        hwnd = get_spotify_hwnd()
+        if hwnd:
+            # WM_APPCOMMAND: wParam = hwnd, lParam = command << 16
+            lparam = command << 16
+            win32api.SendMessage(hwnd, WM_APPCOMMAND, hwnd, lparam)
             return True
         else:
-            print("Failed to focus Spotify before pausing.")
+            print(f"{time.strftime('%H:%M:%S')} - Spotify window not found", flush=True)
             return False
     except Exception as e:
-        print(f"Error pausing Spotify: {e}")
+        print(f"Error sending appcommand: {e}", flush=True)
+        return False
+
+def pause_spotify():
+    """Pause Spotify by sending APPCOMMAND directly to its window"""
+    try:
+        if send_appcommand_to_spotify(APPCOMMAND_MEDIA_PAUSE):
+            print(f"{time.strftime('%H:%M:%S')} - Paused Spotify via AppCommand", flush=True)
+            return True
+        # Fallback: try play/pause toggle
+        if send_appcommand_to_spotify(APPCOMMAND_MEDIA_PLAY_PAUSE):
+            print(f"{time.strftime('%H:%M:%S')} - Paused Spotify via Play/Pause toggle", flush=True)
+            return True
+        return False
+    except Exception as e:
+        print(f"Error pausing Spotify: {e}", flush=True)
         return False
 
 def play_spotify():
+    """Resume Spotify by sending APPCOMMAND directly to its window"""
     try:
-        pyautogui.PAUSE = 0.1
-        if focus_spotify():
-            pyautogui.press('space')
-            # Minimize the Spotify window
-            try:
-                import win32gui
-                import win32con
-                spotify_hwnd = win32gui.GetForegroundWindow()
-                win32gui.ShowWindow(spotify_hwnd, win32con.SW_MINIMIZE)
-            except Exception as e:
-                print(f"Error minimizing Spotify window: {e}")
-            print("Resumed Spotify")
+        if send_appcommand_to_spotify(APPCOMMAND_MEDIA_PLAY):
+            print(f"{time.strftime('%H:%M:%S')} - Resumed Spotify via AppCommand", flush=True)
             return True
-        else:
-            print("Failed to focus Spotify before resuming.")
-            return False
+        # Fallback: try play/pause toggle
+        if send_appcommand_to_spotify(APPCOMMAND_MEDIA_PLAY_PAUSE):
+            print(f"{time.strftime('%H:%M:%S')} - Resumed Spotify via Play/Pause toggle", flush=True)
+            return True
+        return False
     except Exception as e:
-        print(f"Error resuming Spotify: {e}")
+        print(f"Error resuming Spotify: {e}", flush=True)
         return False
 
 class SpotifyControllerGUI:
@@ -423,14 +465,15 @@ class SpotifyControllerGUI:
         self.peak_threshold = ctk.DoubleVar(value=0.0005)
         self.cache_timeout = ctk.IntVar(value=2)
         self.log_interval = ctk.IntVar(value=5)
-        self.action_cooldown = ctk.DoubleVar(value=1.0)
+        self.action_cooldown = ctk.DoubleVar(value=2.0)  # Increased cooldown to prevent rapid switching
         self.debug = ctk.BooleanVar(value=True)
         self.ignored_processes = [
             'system idle process', 'system', 'explorer.exe',
             'FxSound.exe', 'FxSound', 'fxsound.exe', 
             'obs64.exe', 'obs32.exe', 'obs.exe', 'obs-browser-page.exe',
             'SnippingTool.exe', 'ScreenClippingHost.exe',
-            'ScreenClipping.exe'
+            'ScreenClipping.exe',
+            'audiodg.exe'
         ]
         
         self.monitoring = False
@@ -567,9 +610,11 @@ class SpotifyControllerGUI:
         self.log("Monitoring stopped")
         
     def monitor_loop(self):
-        spotify_was_playing = False
+        spotify_paused_by_us = False  # Tracks if WE paused Spotify
         last_action_time = 0
         action_cooldown = self.action_cooldown.get()
+        silence_start_time = None  # Track when other audio stopped
+        silence_threshold = 1.5  # Wait 1.5 seconds of silence before resuming
         
         while self.monitoring:
             try:
@@ -577,6 +622,7 @@ class SpotifyControllerGUI:
                 spotify_process = get_spotify_process()
                 
                 if spotify_process:
+                    # Only check other apps audio
                     other_apps_playing = get_audio_session_result(
                         check_spotify=False,
                         peak_threshold=self.peak_threshold.get(),
@@ -585,28 +631,50 @@ class SpotifyControllerGUI:
                         debug=self.debug.get(),
                         ignored_processes=self.ignored_processes
                     )
-                    time.sleep(0.25)
-                    spotify_playing = get_audio_session_result(
-                        check_spotify=True,
-                        peak_threshold=self.peak_threshold.get(),
-                        cache_timeout=self.cache_timeout.get(),
-                        log_interval=self.log_interval.get(),
-                        debug=self.debug.get(),
-                        ignored_processes=self.ignored_processes
-                    )
                     
+                    # Respect cooldown to prevent rapid switching
                     if current_time - last_action_time >= action_cooldown:
-                        if other_apps_playing and spotify_playing:
-                            if not spotify_was_playing:
+                        if other_apps_playing and not spotify_paused_by_us:
+                            # Other app started playing - pause Spotify
+                            # Reset silence timer since other audio is playing
+                            silence_start_time = None
+                            
+                            time.sleep(0.1)
+                            spotify_playing = get_audio_session_result(
+                                check_spotify=True,
+                                peak_threshold=self.peak_threshold.get(),
+                                cache_timeout=self.cache_timeout.get(),
+                                log_interval=self.log_interval.get(),
+                                debug=self.debug.get(),
+                                ignored_processes=self.ignored_processes
+                            )
+                            if spotify_playing:
                                 if pause_spotify():
-                                    spotify_was_playing = True
+                                    spotify_paused_by_us = True
                                     last_action_time = current_time
-                                    self.log("Paused Spotify")
-                        elif spotify_was_playing and not other_apps_playing:
-                            if play_spotify():
-                                spotify_was_playing = False
-                                last_action_time = current_time
-                                self.log("Resumed Spotify")
+                                    self.log("Paused Spotify (other audio detected)")
+                        
+                        elif spotify_paused_by_us and not other_apps_playing:
+                            # Other app stopped - track silence duration
+                            if silence_start_time is None:
+                                silence_start_time = current_time
+                                print(f"{time.strftime('%H:%M:%S')} - Other audio stopped, waiting {silence_threshold}s before resuming...", flush=True)
+                            
+                            # Wait for sustained silence before resuming
+                            elif current_time - silence_start_time >= silence_threshold:
+                                print(f"{time.strftime('%H:%M:%S')} - Silence confirmed, resuming Spotify...", flush=True)
+                                if play_spotify():
+                                    spotify_paused_by_us = False
+                                    last_action_time = current_time
+                                    silence_start_time = None
+                                    self.log("Resumed Spotify (other audio stopped)")
+                                else:
+                                    # Retry on next loop
+                                    print(f"{time.strftime('%H:%M:%S')} - Resume failed, will retry...", flush=True)
+                        
+                        elif other_apps_playing and spotify_paused_by_us:
+                            # Other audio still playing, reset silence timer
+                            silence_start_time = None
                 
                 time.sleep(0.5)
                 
