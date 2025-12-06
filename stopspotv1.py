@@ -508,6 +508,7 @@ class SpotifyControllerGUI:
         self.bg_color = "#000000"  # Black
         self.fg_color = "#00FF00"  # Green
         self.accent_color = "#800080"  # Purple
+        self.advanced_visible = False
         
         # Settings
         self.peak_threshold = ctk.DoubleVar(value=0.0005)
@@ -533,53 +534,29 @@ class SpotifyControllerGUI:
     def create_widgets(self):
         # Title
         title_label = ctk.CTkLabel(self.root, text="Spotify Auto Controller", font=ctk.CTkFont(size=20, weight="bold"), text_color=self.fg_color)
-        title_label.pack(pady=10)
-        
-        # Settings Frame
-        settings_frame = ctk.CTkFrame(self.root, fg_color=self.bg_color, border_color=self.accent_color, border_width=2)
-        settings_frame.pack(pady=10, padx=20, fill="x")
-        
-        ctk.CTkLabel(settings_frame, text="Settings", font=ctk.CTkFont(size=16, weight="bold"), text_color=self.fg_color).pack(pady=5)
-        
-        # Peak Threshold
-        threshold_frame = ctk.CTkFrame(settings_frame, fg_color=self.bg_color)
-        threshold_frame.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(threshold_frame, text="Peak Threshold:", text_color=self.fg_color).pack(side="left")
-        threshold_entry = ctk.CTkEntry(threshold_frame, textvariable=self.peak_threshold, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
-        threshold_entry.pack(side="right", padx=(10,0))
-        
-        # Cache Timeout
-        cache_frame = ctk.CTkFrame(settings_frame, fg_color=self.bg_color)
-        cache_frame.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(cache_frame, text="Cache Timeout (s):", text_color=self.fg_color).pack(side="left")
-        cache_entry = ctk.CTkEntry(cache_frame, textvariable=self.cache_timeout, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
-        cache_entry.pack(side="right", padx=(10,0))
-        
-        # Log Interval
-        log_frame = ctk.CTkFrame(settings_frame, fg_color=self.bg_color)
-        log_frame.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(log_frame, text="Log Interval (s):", text_color=self.fg_color).pack(side="left")
-        log_entry = ctk.CTkEntry(log_frame, textvariable=self.log_interval, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
-        log_entry.pack(side="right", padx=(10,0))
-        
-        # Action Cooldown
-        cooldown_frame = ctk.CTkFrame(settings_frame, fg_color=self.bg_color)
-        cooldown_frame.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(cooldown_frame, text="Action Cooldown (s):", text_color=self.fg_color).pack(side="left")
-        cooldown_entry = ctk.CTkEntry(cooldown_frame, textvariable=self.action_cooldown, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
-        cooldown_entry.pack(side="right", padx=(10,0))
-        
-        # Debug Mode
-        debug_check = ctk.CTkCheckBox(settings_frame, text="Debug Mode", variable=self.debug, fg_color=self.accent_color, text_color=self.fg_color)
-        debug_check.pack(pady=5)
-        
-        # Ignored Processes
-        ignored_label = ctk.CTkLabel(settings_frame, text="Ignored Processes:", text_color=self.fg_color)
-        ignored_label.pack(pady=5)
-        self.ignored_text = ctk.CTkTextbox(settings_frame, height=100, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
-        self.ignored_text.pack(fill="x", padx=10, pady=5)
-        self.ignored_text.insert("0.0", "\n".join(self.ignored_processes))
-        
+        title_label.pack(pady=8)
+
+        subtitle_label = ctk.CTkLabel(
+            self.root,
+            text="Auto-pause Spotify when other apps play audio.",
+            font=ctk.CTkFont(size=13),
+            text_color=self.fg_color
+        )
+        subtitle_label.pack(pady=(0,10))
+
+        # Advanced toggle
+        toggle_frame = ctk.CTkFrame(self.root, fg_color=self.bg_color)
+        toggle_frame.pack(fill="x", padx=20)
+        self.advanced_button = ctk.CTkButton(
+            toggle_frame,
+            text="Show Advanced",
+            command=self.toggle_advanced,
+            fg_color=self.accent_color,
+            text_color=self.fg_color,
+            width=140
+        )
+        self.advanced_button.pack(anchor="w", pady=4)
+
         # Control Buttons
         control_frame = ctk.CTkFrame(self.root, fg_color=self.bg_color, border_color=self.accent_color, border_width=2)
         control_frame.pack(pady=10, padx=20, fill="x")
@@ -592,13 +569,57 @@ class SpotifyControllerGUI:
         
         # Status
         self.status_label = ctk.CTkLabel(self.root, text="Status: Stopped", text_color=self.fg_color)
-        self.status_label.pack(pady=10)
+        self.status_label.pack(pady=6)
         
         # Log
         log_label = ctk.CTkLabel(self.root, text="Log:", text_color=self.fg_color)
         log_label.pack()
         self.log_text = ctk.CTkTextbox(self.root, height=200, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
-        self.log_text.pack(fill="both", expand=True, padx=20, pady=(0,20))
+        self.log_text.pack(fill="both", expand=True, padx=20, pady=(0,12))
+
+        # Advanced container (hidden by default)
+        self.advanced_frame = ctk.CTkFrame(self.root, fg_color=self.bg_color, border_color=self.accent_color, border_width=2)
+
+        ctk.CTkLabel(self.advanced_frame, text="Advanced Settings", font=ctk.CTkFont(size=16, weight="bold"), text_color=self.fg_color).pack(pady=6)
+        
+        # Peak Threshold
+        threshold_frame = ctk.CTkFrame(self.advanced_frame, fg_color=self.bg_color)
+        threshold_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(threshold_frame, text="Peak Threshold:", text_color=self.fg_color).pack(side="left")
+        threshold_entry = ctk.CTkEntry(threshold_frame, textvariable=self.peak_threshold, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        threshold_entry.pack(side="right", padx=(10,0))
+        
+        # Cache Timeout
+        cache_frame = ctk.CTkFrame(self.advanced_frame, fg_color=self.bg_color)
+        cache_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(cache_frame, text="Cache Timeout (s):", text_color=self.fg_color).pack(side="left")
+        cache_entry = ctk.CTkEntry(cache_frame, textvariable=self.cache_timeout, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        cache_entry.pack(side="right", padx=(10,0))
+        
+        # Log Interval
+        log_frame = ctk.CTkFrame(self.advanced_frame, fg_color=self.bg_color)
+        log_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(log_frame, text="Log Interval (s):", text_color=self.fg_color).pack(side="left")
+        log_entry = ctk.CTkEntry(log_frame, textvariable=self.log_interval, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        log_entry.pack(side="right", padx=(10,0))
+        
+        # Action Cooldown
+        cooldown_frame = ctk.CTkFrame(self.advanced_frame, fg_color=self.bg_color)
+        cooldown_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(cooldown_frame, text="Action Cooldown (s):", text_color=self.fg_color).pack(side="left")
+        cooldown_entry = ctk.CTkEntry(cooldown_frame, textvariable=self.action_cooldown, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        cooldown_entry.pack(side="right", padx=(10,0))
+        
+        # Debug Mode
+        debug_check = ctk.CTkCheckBox(self.advanced_frame, text="Debug Mode", variable=self.debug, fg_color=self.accent_color, text_color=self.fg_color)
+        debug_check.pack(pady=5)
+        
+        # Ignored Processes
+        ignored_label = ctk.CTkLabel(self.advanced_frame, text="Ignored Processes:", text_color=self.fg_color)
+        ignored_label.pack(pady=5)
+        self.ignored_text = ctk.CTkTextbox(self.advanced_frame, height=100, fg_color=self.bg_color, text_color=self.fg_color, border_color=self.accent_color)
+        self.ignored_text.pack(fill="x", padx=10, pady=5)
+        self.ignored_text.insert("0.0", "\n".join(self.ignored_processes))
         
     def log(self, message):
         timestamp = time.strftime('%H:%M:%S')
@@ -606,6 +627,17 @@ class SpotifyControllerGUI:
             self.log_text.insert("end", f"[{timestamp}] {message}\n")
             self.log_text.see("end")
         self.root.after(0, _log)
+
+    def toggle_advanced(self):
+        """Toggle visibility of advanced settings panel."""
+        if self.advanced_visible:
+            self.advanced_frame.pack_forget()
+            self.advanced_button.configure(text="Show Advanced")
+            self.advanced_visible = False
+        else:
+            self.advanced_frame.pack(pady=10, padx=20, fill="x")
+            self.advanced_button.configure(text="Hide Advanced")
+            self.advanced_visible = True
         
     def start_monitoring(self):
         if self.monitoring:
