@@ -156,19 +156,23 @@ class AudioSessionManager:
 
     def check_audio_sessions(self, check_spotify=False):
         if not self._com_initialized:
-            print(f"{time.strftime('%H:%M:%S')} - COM not initialized", flush=True)
+            if self._debug:
+                print(f"{time.strftime('%H:%M:%S')} - COM not initialized", flush=True)
             return False
 
         try:
-            print(f"{time.strftime('%H:%M:%S')} - Initializing audio sessions...", flush=True)
+            if self._debug:
+                print(f"{time.strftime('%H:%M:%S')} - Initializing audio sessions...", flush=True)
             self._initialize_if_needed()
             if not self._initialized or not self._sessions:
-                print(f"{time.strftime('%H:%M:%S')} - Audio sessions not initialized properly", flush=True)
+                if self._debug:
+                    print(f"{time.strftime('%H:%M:%S')} - Audio sessions not initialized properly", flush=True)
                 return False
 
             # Only ignore system processes
             count = self._sessions.GetCount()
-            print(f"{time.strftime('%H:%M:%S')} - Number of audio sessions: {count}", flush=True)
+            if self._debug:
+                print(f"{time.strftime('%H:%M:%S')} - Number of audio sessions: {count}", flush=True)
             found_active = False
             
             # Define identifiers for Spotify and Spotify Premium
@@ -179,7 +183,8 @@ class AudioSessionManager:
                 print(f"Checking {'Spotify' if check_spotify else 'other apps'} audio:", flush=True)
             
             for i in range(count):
-                print(f"{time.strftime('%H:%M:%S')} - Checking session {i+1}/{count}", flush=True)
+                if self._debug:
+                    print(f"{time.strftime('%H:%M:%S')} - Checking session {i+1}/{count}", flush=True)
                 session = None
                 audio_session = None
                 volume = None
@@ -187,66 +192,84 @@ class AudioSessionManager:
                 
                 try:
                     session = self._sessions.GetSession(i)
-                    print(f"{time.strftime('%H:%M:%S')} - Retrieved session object for session {i+1}", flush=True)
+                    if self._debug:
+                        print(f"{time.strftime('%H:%M:%S')} - Retrieved session object for session {i+1}", flush=True)
                     if not session:
-                        print(f"{time.strftime('%H:%M:%S')} - Session {i+1} is None", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Session {i+1} is None", flush=True)
                         continue
 
                     try:
                         audio_session = session.QueryInterface(pycaw.IAudioSessionControl2)
-                        print(f"{time.strftime('%H:%M:%S')} - Queried IAudioSessionControl2 for session {i+1}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Queried IAudioSessionControl2 for session {i+1}", flush=True)
                     except Exception as e:
-                        print(f"{time.strftime('%H:%M:%S')} - Failed to query IAudioSessionControl2 for session {i+1}: {e}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Failed to query IAudioSessionControl2 for session {i+1}: {e}", flush=True)
                         continue
 
                     try:
                         volume = session.QueryInterface(pycaw.ISimpleAudioVolume)
-                        print(f"{time.strftime('%H:%M:%S')} - Queried ISimpleAudioVolume for session {i+1}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Queried ISimpleAudioVolume for session {i+1}", flush=True)
                     except Exception as e:
-                        print(f"{time.strftime('%H:%M:%S')} - Failed to query ISimpleAudioVolume for session {i+1}: {e}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Failed to query ISimpleAudioVolume for session {i+1}: {e}", flush=True)
 
                     try:
                         meter = session.QueryInterface(pycaw.IAudioMeterInformation)
-                        print(f"{time.strftime('%H:%M:%S')} - Queried IAudioMeterInformation for session {i+1}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Queried IAudioMeterInformation for session {i+1}", flush=True)
                     except Exception as e:
-                        print(f"{time.strftime('%H:%M:%S')} - Failed to query IAudioMeterInformation for session {i+1}: {e}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Failed to query IAudioMeterInformation for session {i+1}: {e}", flush=True)
                     
                     try:
                         process_id = audio_session.GetProcessId()
-                        print(f"{time.strftime('%H:%M:%S')} - Process ID: {process_id}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Process ID: {process_id}", flush=True)
                     except Exception as e:
-                        print(f"{time.strftime('%H:%M:%S')} - Failed to get Process ID for session {i+1}: {e}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Failed to get Process ID for session {i+1}: {e}", flush=True)
                         continue
 
                     try:
                         process = psutil.Process(process_id)
-                        print(f"{time.strftime('%H:%M:%S')} - Retrieved process for PID {process_id}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Retrieved process for PID {process_id}", flush=True)
                         process_name = process.name().lower()
-                        print(f"{time.strftime('%H:%M:%S')} - Process name: {process_name}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Process name: {process_name}", flush=True)
                     except psutil.NoSuchProcess:
-                        print(f"{time.strftime('%H:%M:%S')} - No such process with PID: {process_id}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - No such process with PID: {process_id}", flush=True)
                         continue
                     except Exception as e:
-                        print(f"{time.strftime('%H:%M:%S')} - Error retrieving process for PID {process_id}: {e}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Error retrieving process for PID {process_id}: {e}", flush=True)
                         continue
                     
                     if process_name in self._ignored_processes:
-                        print(f"{time.strftime('%H:%M:%S')} - Ignored process: {process_name}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Ignored process: {process_name}", flush=True)
                         continue
                         
                     # Check for both Spotify and Spotify Premium
                     is_spotify = any(identifier in process_name for identifier in SPOTIFY_IDENTIFIERS)
                     
                     if check_spotify != is_spotify:
-                        print(f"{time.strftime('%H:%M:%S')} - Skipping {'Spotify' if not is_spotify else 'other app'}: {process_name}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Skipping {'Spotify' if not is_spotify else 'other app'}: {process_name}", flush=True)
                         continue
                         
                     try:
                         state = audio_session.GetState()
                         peak = meter.GetPeakValue() if meter else 0
-                        print(f"{time.strftime('%H:%M:%S')} - State: {state}, Peak: {peak:.6f}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - State: {state}, Peak: {peak:.6f}", flush=True)
                     except Exception as e:
-                        print(f"{time.strftime('%H:%M:%S')} - Failed to get state or peak for session {i+1}: {e}", flush=True)
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - Failed to get state or peak for session {i+1}: {e}", flush=True)
                         continue
                     
                     if self._debug and (peak > self._peak_threshold or state == AUDCLNT_SESSIONSTATE_ACTIVE):
@@ -263,6 +286,7 @@ class AudioSessionManager:
                 finally:
                     for obj in (meter, volume, audio_session, session):
                         self._safe_release(obj)
+                    if self._debug:
                         print(f"{time.strftime('%H:%M:%S')} - Released COM objects for session {i+1}", flush=True)
             
             if self._debug:
@@ -271,7 +295,8 @@ class AudioSessionManager:
             return found_active
             
         except Exception as e:
-            print(f"{time.strftime('%H:%M:%S')} - Error checking audio sessions: {e}", flush=True)
+            if self._debug:
+                print(f"{time.strftime('%H:%M:%S')} - Error checking audio sessions: {e}", flush=True)
             self._cleanup()
             return False
 
@@ -303,7 +328,7 @@ def get_spotify_process():
     return None
 
 # Update focus_spotify to use stored PIDs
-def focus_spotify():
+def focus_spotify(debug=False):
     try:
         import win32gui
         import win32process
@@ -340,19 +365,24 @@ def focus_spotify():
                     win32process.AttachThreadInput(current_thread_id, fg_thread_id, False)
                     win32process.AttachThreadInput(current_thread_id, target_thread_id, False)
 
-                    print(f"{time.strftime('%H:%M:%S')} - Spotify window focused for PID {pid}.", flush=True)
+                    if debug:
+                        print(f"{time.strftime('%H:%M:%S')} - Spotify window focused for PID {pid}.", flush=True)
                     return True
             except Exception as e:
-                print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed for PID {pid}: {e}", flush=True)
-        print(f"{time.strftime('%H:%M:%S')} - Spotify windows not found for any stored PIDs.", flush=True)
+                if debug:
+                    print(f"{time.strftime('%H:%M:%S')} - EnumWindows failed for PID {pid}: {e}", flush=True)
+        if debug:
+            print(f"{time.strftime('%H:%M:%S')} - Spotify windows not found for any stored PIDs.", flush=True)
         return False
 
     except ImportError as e:
-        print(f"Error importing win32 modules: {e}", flush=True)
-        print("Please install pywin32 and ensure it is correctly configured.", flush=True)
+        if debug:
+            print(f"Error importing win32 modules: {e}", flush=True)
+            print("Please install pywin32 and ensure it is correctly configured.", flush=True)
         return False
     except Exception as e:
-        print(f"Error focusing Spotify: {e}", flush=True)
+        if debug:
+            print(f"Error focusing Spotify: {e}", flush=True)
         return False
 
 # Windows AppCommand constants for media control
@@ -360,6 +390,8 @@ APPCOMMAND_MEDIA_PLAY_PAUSE = 14
 APPCOMMAND_MEDIA_PLAY = 46
 APPCOMMAND_MEDIA_PAUSE = 47
 WM_APPCOMMAND = 0x0319
+
+_debug_mode = False  # Global debug flag for standalone functions
 
 def get_spotify_hwnd():
     """Get Spotify's main window handle without focusing it"""
@@ -388,7 +420,8 @@ def get_spotify_hwnd():
         win32gui.EnumWindows(callback, None)
         return spotify_hwnd
     except Exception as e:
-        print(f"Error getting Spotify hwnd: {e}", flush=True)
+        if _debug_mode:
+            print(f"Error getting Spotify hwnd: {e}", flush=True)
         return None
 
 def send_appcommand_to_spotify(command):
@@ -404,40 +437,48 @@ def send_appcommand_to_spotify(command):
             win32api.SendMessage(hwnd, WM_APPCOMMAND, hwnd, lparam)
             return True
         else:
-            print(f"{time.strftime('%H:%M:%S')} - Spotify window not found", flush=True)
+            if _debug_mode:
+                print(f"{time.strftime('%H:%M:%S')} - Spotify window not found", flush=True)
             return False
     except Exception as e:
-        print(f"Error sending appcommand: {e}", flush=True)
+        if _debug_mode:
+            print(f"Error sending appcommand: {e}", flush=True)
         return False
 
 def pause_spotify():
     """Pause Spotify by sending APPCOMMAND directly to its window"""
     try:
         if send_appcommand_to_spotify(APPCOMMAND_MEDIA_PAUSE):
-            print(f"{time.strftime('%H:%M:%S')} - Paused Spotify via AppCommand", flush=True)
+            if _debug_mode:
+                print(f"{time.strftime('%H:%M:%S')} - Paused Spotify via AppCommand", flush=True)
             return True
         # Fallback: try play/pause toggle
         if send_appcommand_to_spotify(APPCOMMAND_MEDIA_PLAY_PAUSE):
-            print(f"{time.strftime('%H:%M:%S')} - Paused Spotify via Play/Pause toggle", flush=True)
+            if _debug_mode:
+                print(f"{time.strftime('%H:%M:%S')} - Paused Spotify via Play/Pause toggle", flush=True)
             return True
         return False
     except Exception as e:
-        print(f"Error pausing Spotify: {e}", flush=True)
+        if _debug_mode:
+            print(f"Error pausing Spotify: {e}", flush=True)
         return False
 
 def play_spotify():
     """Resume Spotify by sending APPCOMMAND directly to its window"""
     try:
         if send_appcommand_to_spotify(APPCOMMAND_MEDIA_PLAY):
-            print(f"{time.strftime('%H:%M:%S')} - Resumed Spotify via AppCommand", flush=True)
+            if _debug_mode:
+                print(f"{time.strftime('%H:%M:%S')} - Resumed Spotify via AppCommand", flush=True)
             return True
         # Fallback: try play/pause toggle
         if send_appcommand_to_spotify(APPCOMMAND_MEDIA_PLAY_PAUSE):
-            print(f"{time.strftime('%H:%M:%S')} - Resumed Spotify via Play/Pause toggle", flush=True)
+            if _debug_mode:
+                print(f"{time.strftime('%H:%M:%S')} - Resumed Spotify via Play/Pause toggle", flush=True)
             return True
         return False
     except Exception as e:
-        print(f"Error resuming Spotify: {e}", flush=True)
+        if _debug_mode:
+            print(f"Error resuming Spotify: {e}", flush=True)
         return False
 
 class SpotifyControllerGUI:
@@ -466,7 +507,7 @@ class SpotifyControllerGUI:
         self.cache_timeout = ctk.IntVar(value=2)
         self.log_interval = ctk.IntVar(value=5)
         self.action_cooldown = ctk.DoubleVar(value=2.0)  # Increased cooldown to prevent rapid switching
-        self.debug = ctk.BooleanVar(value=True)
+        self.debug = ctk.BooleanVar(value=False)  # Debug mode off by default
         self.ignored_processes = [
             'system idle process', 'system', 'explorer.exe',
             'FxSound.exe', 'FxSound', 'fxsound.exe', 
@@ -593,14 +634,15 @@ class SpotifyControllerGUI:
         self.monitoring = False
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=2)  # Wait up to 2 seconds for thread to finish
-            if self.monitor_thread.is_alive():
+            if self.monitor_thread.is_alive() and self.debug.get():
                 print("Warning: Monitoring thread did not stop gracefully", flush=True)
         
         if self.audio_manager:
             try:
                 self.audio_manager.close()
             except Exception as e:
-                print(f"Error closing audio manager: {e}", flush=True)
+                if self.debug.get():
+                    print(f"Error closing audio manager: {e}", flush=True)
             self.audio_manager = None
         
         self.start_button.configure(state="normal")
@@ -610,6 +652,9 @@ class SpotifyControllerGUI:
         self.log("Monitoring stopped")
         
     def monitor_loop(self):
+        global _debug_mode
+        _debug_mode = self.debug.get()  # Set global debug flag
+        
         spotify_paused_by_us = False  # Tracks if WE paused Spotify
         last_action_time = 0
         action_cooldown = self.action_cooldown.get()
@@ -658,11 +703,13 @@ class SpotifyControllerGUI:
                             # Other app stopped - track silence duration
                             if silence_start_time is None:
                                 silence_start_time = current_time
-                                print(f"{time.strftime('%H:%M:%S')} - Other audio stopped, waiting {silence_threshold}s before resuming...", flush=True)
+                                if self.debug.get():
+                                    print(f"{time.strftime('%H:%M:%S')} - Other audio stopped, waiting {silence_threshold}s before resuming...", flush=True)
                             
                             # Wait for sustained silence before resuming
                             elif current_time - silence_start_time >= silence_threshold:
-                                print(f"{time.strftime('%H:%M:%S')} - Silence confirmed, resuming Spotify...", flush=True)
+                                if self.debug.get():
+                                    print(f"{time.strftime('%H:%M:%S')} - Silence confirmed, resuming Spotify...", flush=True)
                                 if play_spotify():
                                     spotify_paused_by_us = False
                                     last_action_time = current_time
@@ -670,7 +717,8 @@ class SpotifyControllerGUI:
                                     self.log("Resumed Spotify (other audio stopped)")
                                 else:
                                     # Retry on next loop
-                                    print(f"{time.strftime('%H:%M:%S')} - Resume failed, will retry...", flush=True)
+                                    if self.debug.get():
+                                        print(f"{time.strftime('%H:%M:%S')} - Resume failed, will retry...", flush=True)
                         
                         elif other_apps_playing and spotify_paused_by_us:
                             # Other audio still playing, reset silence timer
@@ -680,7 +728,8 @@ class SpotifyControllerGUI:
                 
             except Exception as e:
                 error_msg = f"Error in monitoring loop: {e}"
-                print(error_msg, flush=True)  # Also print to console for debugging
+                if self.debug.get():
+                    print(error_msg, flush=True)  # Also print to console for debugging
                 self.log(error_msg)
                 time.sleep(2)  # Wait longer on error to prevent rapid restarts
         
@@ -688,11 +737,12 @@ class SpotifyControllerGUI:
         try:
             self.root.mainloop()
         except Exception as e:
-            print(f"Critical GUI error: {e}", flush=True)
+            if self.debug.get():
+                print(f"Critical GUI error: {e}", flush=True)
             # Don't restart, just exit gracefully
             sys.exit(1)
 
-def get_audio_session_result(check_spotify, peak_threshold=0.0005, cache_timeout=2, log_interval=5, debug=True, ignored_processes=None):
+def get_audio_session_result(check_spotify, peak_threshold=0.0005, cache_timeout=2, log_interval=5, debug=False, ignored_processes=None):
     """Get audio session result using direct call instead of subprocess to avoid cursor loading"""
     try:
         audio_manager = AudioSessionManager(
@@ -704,7 +754,8 @@ def get_audio_session_result(check_spotify, peak_threshold=0.0005, cache_timeout
         )
         
         if not audio_manager._com_initialized:
-            print(f"{time.strftime('%H:%M:%S')} - COM not initialized in direct call", flush=True)
+            if debug:
+                print(f"{time.strftime('%H:%M:%S')} - COM not initialized in direct call", flush=True)
             return False
             
         result = audio_manager.check_audio_sessions(check_spotify)
@@ -712,7 +763,8 @@ def get_audio_session_result(check_spotify, peak_threshold=0.0005, cache_timeout
         return result
         
     except Exception as e:
-        print(f"{time.strftime('%H:%M:%S')} - Direct audio check error: {e}", flush=True)
+        if debug:
+            print(f"{time.strftime('%H:%M:%S')} - Direct audio check error: {e}", flush=True)
         return False
 
 def clear_screen():
