@@ -66,58 +66,58 @@ class AudioSessionManager:
                 pass  # Silently handle release errors
 
     def _initialize_if_needed(self):
+        """Always rebuild session enumerator to avoid stale COM pointers."""
         with self._lock:
             try:
                 current_time = time.time()
-                if not self._initialized or current_time - self._last_check > self._cache_timeout:
-                    if self._debug and (current_time - self._last_log_time) > self._log_interval:
-                        print(f"{time.strftime('%H:%M:%S')} - Initializing audio session manager...", flush=True)
-                        self._last_log_time = current_time
-                    self._cleanup()
-                    # Retry COM initialization up to 3 times
-                    for attempt in range(3):
-                        try:
-                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
-                                print(f"{time.strftime('%H:%M:%S')} - Initialization attempt {attempt + 1}", flush=True)
-                                self._last_log_time = current_time
-                            self._devices = pycaw.AudioUtilities.GetSpeakers()
-                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
-                                print(f"{time.strftime('%H:%M:%S')} - Retrieved speakers: {self._devices}", flush=True)
-                                self._last_log_time = current_time
-                            
-                            self._interface = self._devices.Activate(
-                                pycaw.IAudioSessionManager2._iid_, 
-                                CLSCTX_ALL, 
-                                None
-                            )
-                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
-                                print(f"{time.strftime('%H:%M:%S')} - Activated IAudioSessionManager2 interface: {self._interface}", flush=True)
-                                self._last_log_time = current_time
-                            
-                            self._session_manager = cast(self._interface, POINTER(pycaw.IAudioSessionManager2))
-                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
-                                print(f"{time.strftime('%H:%M:%S')} - Casted to IAudioSessionManager2: {self._session_manager}", flush=True)
-                                self._last_log_time = current_time
-                            
-                            self._sessions = self._session_manager.GetSessionEnumerator()
-                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
-                                print(f"{time.strftime('%H:%M:%S')} - Retrieved session enumerator: {self._sessions}", flush=True)
-                                self._last_log_time = current_time
-                            
-                            self._last_check = current_time
-                            self._initialized = True
-                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
-                                print(f"{time.strftime('%H:%M:%S')} - Initialization successful", flush=True)
-                                self._last_log_time = current_time
-                            break
-                        except Exception as e:
-                            if self._debug and (current_time - self._last_log_time) > self._log_interval:
-                                print(f"{time.strftime('%H:%M:%S')} - Initialization attempt {attempt + 1} failed: {e}", flush=True)
-                                self._last_log_time = current_time
-                            time.sleep(0.1)
-                    
-                    if not self._initialized:
-                        raise Exception("Failed to initialize COM objects after 3 attempts")
+                if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                    print(f"{time.strftime('%H:%M:%S')} - Initializing audio session manager...", flush=True)
+                    self._last_log_time = current_time
+                self._cleanup()
+                # Retry COM initialization up to 3 times
+                for attempt in range(3):
+                    try:
+                        if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                            print(f"{time.strftime('%H:%M:%S')} - Initialization attempt {attempt + 1}", flush=True)
+                            self._last_log_time = current_time
+                        self._devices = pycaw.AudioUtilities.GetSpeakers()
+                        if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                            print(f"{time.strftime('%H:%M:%S')} - Retrieved speakers: {self._devices}", flush=True)
+                            self._last_log_time = current_time
+                        
+                        self._interface = self._devices.Activate(
+                            pycaw.IAudioSessionManager2._iid_, 
+                            CLSCTX_ALL, 
+                            None
+                        )
+                        if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                            print(f"{time.strftime('%H:%M:%S')} - Activated IAudioSessionManager2 interface: {self._interface}", flush=True)
+                            self._last_log_time = current_time
+                        
+                        self._session_manager = cast(self._interface, POINTER(pycaw.IAudioSessionManager2))
+                        if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                            print(f"{time.strftime('%H:%M:%S')} - Casted to IAudioSessionManager2: {self._session_manager}", flush=True)
+                            self._last_log_time = current_time
+                        
+                        self._sessions = self._session_manager.GetSessionEnumerator()
+                        if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                            print(f"{time.strftime('%H:%M:%S')} - Retrieved session enumerator: {self._sessions}", flush=True)
+                            self._last_log_time = current_time
+                        
+                        self._last_check = current_time
+                        self._initialized = True
+                        if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                            print(f"{time.strftime('%H:%M:%S')} - Initialization successful", flush=True)
+                            self._last_log_time = current_time
+                        break
+                    except Exception as e:
+                        if self._debug and (current_time - self._last_log_time) > self._log_interval:
+                            print(f"{time.strftime('%H:%M:%S')} - Initialization attempt {attempt + 1} failed: {e}", flush=True)
+                            self._last_log_time = current_time
+                        time.sleep(0.1)
+                
+                if not self._initialized:
+                    raise Exception("Failed to initialize COM objects after 3 attempts")
             except Exception as e:
                 if self._debug and (current_time - self._last_log_time) > self._log_interval:
                     print(f"{time.strftime('%H:%M:%S')} - Critical initialization error: {e}", flush=True)
@@ -208,6 +208,11 @@ class AudioSessionManager:
                             print(f"{time.strftime('%H:%M:%S')} - Failed to query IAudioSessionControl2 for session {i+1}: {e}", flush=True)
                         continue
 
+                    if not audio_session:
+                        if self._debug:
+                            print(f"{time.strftime('%H:%M:%S')} - audio_session is None for session {i+1}", flush=True)
+                        continue
+
                     try:
                         volume = session.QueryInterface(pycaw.ISimpleAudioVolume)
                         if self._debug:
@@ -231,7 +236,9 @@ class AudioSessionManager:
                     except Exception as e:
                         if self._debug:
                             print(f"{time.strftime('%H:%M:%S')} - Failed to get Process ID for session {i+1}: {e}", flush=True)
-                        continue
+                        # Restart enumerator on fatal COM errors to avoid stale pointers
+                        self._cleanup()
+                        return False
 
                     try:
                         process = psutil.Process(process_id)
@@ -595,8 +602,10 @@ class SpotifyControllerGUI:
         
     def log(self, message):
         timestamp = time.strftime('%H:%M:%S')
-        self.log_text.insert("end", f"[{timestamp}] {message}\n")
-        self.log_text.see("end")
+        def _log():
+            self.log_text.insert("end", f"[{timestamp}] {message}\n")
+            self.log_text.see("end")
+        self.root.after(0, _log)
         
     def start_monitoring(self):
         if self.monitoring:
@@ -655,83 +664,96 @@ class SpotifyControllerGUI:
         global _debug_mode
         _debug_mode = self.debug.get()  # Set global debug flag
         
+        # Create a persistent audio manager for this thread
+        thread_audio_manager = AudioSessionManager(
+            peak_threshold=self.peak_threshold.get(),
+            cache_timeout=self.cache_timeout.get(),
+            log_interval=self.log_interval.get(),
+            debug=self.debug.get(),
+            ignored_processes=self.ignored_processes
+        )
+        
+        if not thread_audio_manager._com_initialized:
+            self.log("Thread COM initialization failed")
+            return
+
         spotify_paused_by_us = False  # Tracks if WE paused Spotify
         last_action_time = 0
         action_cooldown = self.action_cooldown.get()
         silence_start_time = None  # Track when other audio stopped
         silence_threshold = 1.5  # Wait 1.5 seconds of silence before resuming
         
-        while self.monitoring:
-            try:
-                current_time = time.time()
-                spotify_process = get_spotify_process()
-                
-                if spotify_process:
-                    # Only check other apps audio
-                    other_apps_playing = get_audio_session_result(
-                        check_spotify=False,
-                        peak_threshold=self.peak_threshold.get(),
-                        cache_timeout=self.cache_timeout.get(),
-                        log_interval=self.log_interval.get(),
-                        debug=self.debug.get(),
-                        ignored_processes=self.ignored_processes
-                    )
+        try:
+            while self.monitoring:
+                try:
+                    # Update settings on the fly
+                    thread_audio_manager._peak_threshold = self.peak_threshold.get()
+                    thread_audio_manager._cache_timeout = self.cache_timeout.get()
+                    thread_audio_manager._debug = self.debug.get()
+                    thread_audio_manager._ignored_processes = set(proc.lower() for proc in self.ignored_processes)
+                    _debug_mode = self.debug.get()
                     
-                    # Respect cooldown to prevent rapid switching
-                    if current_time - last_action_time >= action_cooldown:
-                        if other_apps_playing and not spotify_paused_by_us:
-                            # Other app started playing - pause Spotify
-                            # Reset silence timer since other audio is playing
-                            silence_start_time = None
-                            
-                            time.sleep(0.1)
-                            spotify_playing = get_audio_session_result(
-                                check_spotify=True,
-                                peak_threshold=self.peak_threshold.get(),
-                                cache_timeout=self.cache_timeout.get(),
-                                log_interval=self.log_interval.get(),
-                                debug=self.debug.get(),
-                                ignored_processes=self.ignored_processes
-                            )
-                            if spotify_playing:
-                                if pause_spotify():
-                                    spotify_paused_by_us = True
-                                    last_action_time = current_time
-                                    self.log("Paused Spotify (other audio detected)")
+                    current_time = time.time()
+                    spotify_process = get_spotify_process()
+                    
+                    if spotify_process:
+                        # Only check other apps audio
+                        other_apps_playing = thread_audio_manager.check_audio_sessions(check_spotify=False)
                         
-                        elif spotify_paused_by_us and not other_apps_playing:
-                            # Other app stopped - track silence duration
-                            if silence_start_time is None:
-                                silence_start_time = current_time
-                                if self.debug.get():
-                                    print(f"{time.strftime('%H:%M:%S')} - Other audio stopped, waiting {silence_threshold}s before resuming...", flush=True)
+                        # Respect cooldown to prevent rapid switching
+                        if current_time - last_action_time >= action_cooldown:
+                            if other_apps_playing and not spotify_paused_by_us:
+                                # Other app started playing - pause Spotify
+                                # Reset silence timer since other audio is playing
+                                silence_start_time = None
+                                
+                                time.sleep(0.1)
+                                spotify_playing = thread_audio_manager.check_audio_sessions(check_spotify=True)
+                                if spotify_playing:
+                                    if pause_spotify():
+                                        spotify_paused_by_us = True
+                                        last_action_time = current_time
+                                        self.log("Paused Spotify (other audio detected)")
                             
-                            # Wait for sustained silence before resuming
-                            elif current_time - silence_start_time >= silence_threshold:
-                                if self.debug.get():
-                                    print(f"{time.strftime('%H:%M:%S')} - Silence confirmed, resuming Spotify...", flush=True)
-                                if play_spotify():
-                                    spotify_paused_by_us = False
-                                    last_action_time = current_time
-                                    silence_start_time = None
-                                    self.log("Resumed Spotify (other audio stopped)")
-                                else:
-                                    # Retry on next loop
+                            elif spotify_paused_by_us and not other_apps_playing:
+                                # Other app stopped - track silence duration
+                                if silence_start_time is None:
+                                    silence_start_time = current_time
                                     if self.debug.get():
-                                        print(f"{time.strftime('%H:%M:%S')} - Resume failed, will retry...", flush=True)
-                        
-                        elif other_apps_playing and spotify_paused_by_us:
-                            # Other audio still playing, reset silence timer
-                            silence_start_time = None
-                
-                time.sleep(0.5)
-                
-            except Exception as e:
-                error_msg = f"Error in monitoring loop: {e}"
-                if self.debug.get():
-                    print(error_msg, flush=True)  # Also print to console for debugging
-                self.log(error_msg)
-                time.sleep(2)  # Wait longer on error to prevent rapid restarts
+                                        print(f"{time.strftime('%H:%M:%S')} - Other audio stopped, waiting {silence_threshold}s before resuming...", flush=True)
+                                
+                                # Wait for sustained silence before resuming
+                                elif current_time - silence_start_time >= silence_threshold:
+                                    if self.debug.get():
+                                        print(f"{time.strftime('%H:%M:%S')} - Silence confirmed, resuming Spotify...", flush=True)
+                                    if play_spotify():
+                                        spotify_paused_by_us = False
+                                        last_action_time = current_time
+                                        silence_start_time = None
+                                        self.log("Resumed Spotify (other audio stopped)")
+                                    else:
+                                        # Retry on next loop
+                                        if self.debug.get():
+                                            print(f"{time.strftime('%H:%M:%S')} - Resume failed, will retry...", flush=True)
+                            
+                            elif other_apps_playing and spotify_paused_by_us:
+                                # Other audio still playing, reset silence timer
+                                silence_start_time = None
+                    
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    error_msg = f"Error in monitoring loop: {e}"
+                    if self.debug.get():
+                        print(error_msg, flush=True)  # Also print to console for debugging
+                    self.log(error_msg)
+                    time.sleep(2)  # Wait longer on error to prevent rapid restarts
+        finally:
+            # Ensure cleanup happens when loop exits
+            if thread_audio_manager:
+                thread_audio_manager.close()
+            if self.debug.get():
+                print("Monitoring thread exited and cleaned up", flush=True)
         
     def run(self):
         try:
