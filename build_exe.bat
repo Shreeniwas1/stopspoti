@@ -47,15 +47,12 @@ echo Building single-file executable with icon...
 pyinstaller --onefile --noconsole --icon=%ICON_ICO% --exclude-module multiprocessing --name="SpotifyAutoController" %MAIN_SCRIPT%
 
 REM Check if build was successful
-if exist "dist\SpotifyAutoController\SpotifyAutoController.exe" (
+if exist "dist\SpotifyAutoController.exe" (
     echo.
     echo Build completed successfully!
-    echo Executable location: dist\SpotifyAutoController\SpotifyAutoController.exe
-    echo File size: 
-    dir /b dist\SpotifyAutoController\SpotifyAutoController.exe | for %%A in (?) do echo %%~zA bytes
+    echo Executable location: dist\SpotifyAutoController.exe
     echo.
     echo The executable now includes the custom icon and improved error handling.
-    echo Note: This creates a directory with the executable and dependencies.
 ) else (
     echo.
     echo Build failed! Check the output above for errors.

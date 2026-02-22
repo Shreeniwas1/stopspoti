@@ -14,6 +14,7 @@ import threading
 import customtkinter as ctk
 from PIL import Image
 import pystray
+import gc
 
 # Add audio session state constants
 AUDCLNT_SESSIONSTATE_ACTIVE = 1
@@ -44,6 +45,7 @@ class AudioSessionManager:
         self._com_initialized = False
         self._last_log_time = 0
         self._log_interval = log_interval
+        self._last_reset_time = time.time()
         self._ignored_processes = set(proc.lower() for proc in (ignored_processes or [
             'system idle process', 'system', 'explorer.exe',
             'FxSound.exe', 'FxSound', 'fxsound.exe', 
@@ -52,11 +54,6 @@ class AudioSessionManager:
             'ScreenClipping.exe',
             'audiodg.exe',  # Windows Audio Device Graph - proxy for all audio, ignore it
         ]))
-        try:
-            pythoncom.CoInitialize()
-            self._com_initialized = True
-        except Exception as e:
-            print(f"COM initialization failed: {e}")
 
     def _safe_release(self, com_object):
         if com_object:
@@ -70,6 +67,14 @@ class AudioSessionManager:
         with self._lock:
             try:
                 current_time = time.time()
+                
+                # Force reset every 5 minutes (300 seconds)
+                if current_time - self._last_reset_time > 300:
+                    if self._debug:
+                        print(f"{time.strftime('%H:%M:%S')} - Performing 5-minute periodic COM reset...", flush=True)
+                    self._cleanup()
+                    self._last_reset_time = current_time
+
                 if self._debug and (current_time - self._last_log_time) > self._log_interval:
                     print(f"{time.strftime('%H:%M:%S')} - Initializing audio session manager...", flush=True)
                     self._last_log_time = current_time
@@ -140,11 +145,19 @@ class AudioSessionManager:
                 self._safe_release(self._session_manager)
                 self._safe_release(self._interface)
             finally:
+                # Force Python to delete variables
+                if self._sessions: del self._sessions
+                if self._session_manager: del self._session_manager
+                if self._interface: del self._interface
+                if self._devices: del self._devices
+                
                 self._sessions = None
                 self._session_manager = None
                 self._interface = None
                 self._devices = None
                 self._initialized = False
+                
+                gc.collect() # Force hard garbage collection here to clean dangling STDMETHOD structs
 
     def close(self):
         try:
@@ -155,10 +168,7 @@ class AudioSessionManager:
             pass  # Silently ignore exceptions during cleanup
 
     def check_audio_sessions(self, check_spotify=False):
-        if not self._com_initialized:
-            if self._debug:
-                print(f"{time.strftime('%H:%M:%S')} - COM not initialized", flush=True)
-            return False
+        # We assume CoInitialize is handled correctly by the caller / current thread now
 
         try:
             if self._debug:
@@ -293,8 +303,16 @@ class AudioSessionManager:
                 finally:
                     for obj in (meter, volume, audio_session, session):
                         self._safe_release(obj)
+                    
+                    if meter: del meter
+                    if volume: del volume
+                    if audio_session: del audio_session
+                    if session: del session
+                    
                     if self._debug:
                         print(f"{time.strftime('%H:%M:%S')} - Released COM objects for session {i+1}", flush=True)
+            
+            gc.collect() # Ensure session variables get completely garbage collected each loop
             
             if self._debug:
                 print(f"\nFound active audio: {found_active}", flush=True)
@@ -654,10 +672,6 @@ class SpotifyControllerGUI:
             ignored_processes=self.ignored_processes
         )
         
-        if not self.audio_manager._com_initialized:
-            self.log("Failed to initialize COM")
-            return
-        
         self.monitoring = True
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
@@ -696,6 +710,12 @@ class SpotifyControllerGUI:
         global _debug_mode
         _debug_mode = self.debug.get()  # Set global debug flag
         
+        # Thread-local COM initialization
+        try:
+            pythoncom.CoInitialize()
+        except:
+            pass
+
         # Create a persistent audio manager for this thread
         thread_audio_manager = AudioSessionManager(
             peak_threshold=self.peak_threshold.get(),
@@ -704,10 +724,7 @@ class SpotifyControllerGUI:
             debug=self.debug.get(),
             ignored_processes=self.ignored_processes
         )
-        
-        if not thread_audio_manager._com_initialized:
-            self.log("Thread COM initialization failed")
-            return
+        thread_audio_manager._com_initialized = True
 
         spotify_paused_by_us = False  # Tracks if WE paused Spotify
         last_action_time = 0
@@ -784,6 +801,11 @@ class SpotifyControllerGUI:
             # Ensure cleanup happens when loop exits
             if thread_audio_manager:
                 thread_audio_manager.close()
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
+                
             if self.debug.get():
                 print("Monitoring thread exited and cleaned up", flush=True)
         
@@ -797,8 +819,12 @@ class SpotifyControllerGUI:
             sys.exit(1)
 
 def get_audio_session_result(check_spotify, peak_threshold=0.0005, cache_timeout=2, log_interval=5, debug=False, ignored_processes=None):
-    """Get audio session result using direct call instead of subprocess to avoid cursor loading"""
     try:
+        try:
+            pythoncom.CoInitialize()
+        except:
+            pass
+            
         audio_manager = AudioSessionManager(
             peak_threshold=peak_threshold,
             cache_timeout=cache_timeout,
@@ -806,14 +832,16 @@ def get_audio_session_result(check_spotify, peak_threshold=0.0005, cache_timeout
             debug=debug,
             ignored_processes=ignored_processes
         )
-        
-        if not audio_manager._com_initialized:
-            if debug:
-                print(f"{time.strftime('%H:%M:%S')} - COM not initialized in direct call", flush=True)
-            return False
+        audio_manager._com_initialized = True
             
         result = audio_manager.check_audio_sessions(check_spotify)
         audio_manager.close()
+        
+        try:
+            pythoncom.CoUninitialize()
+        except:
+            pass
+            
         return result
         
     except Exception as e:
@@ -856,10 +884,13 @@ def test_resource_usage():
     print(f"Process ID: {os.getpid()}")
     print("Starting resource monitoring test...")
     
+    try:
+        pythoncom.CoInitialize()
+    except:
+        pass
+        
     audio_manager = AudioSessionManager()
-    if not audio_manager._com_initialized:
-        print("Failed to initialize COM")
-        return
+    audio_manager._com_initialized = True
     
     spotify_was_playing = False
     last_action_time = 0
@@ -915,6 +946,11 @@ def test_resource_usage():
     print(f"Memory: {final_memory:.1f} MB")
     
     audio_manager.close()
+    try:
+        pythoncom.CoUninitialize()
+    except:
+        pass
+        
     print("Test completed.")
 
 if __name__ == "__main__":
